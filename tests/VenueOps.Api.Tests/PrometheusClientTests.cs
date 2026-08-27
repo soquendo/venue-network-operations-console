@@ -8,6 +8,125 @@ namespace VenueOps.Api.Tests;
 public sealed class PrometheusClientTests
 {
     [Fact]
+    public async Task MapsAllAccessPointAndZoneSeriesIntoOperationsOverview()
+    {
+        var handler = new StubPrometheusHandler(expression => expression switch
+        {
+            "venue_ap_operational" => ApVector("1", "1", "1", "1"),
+            "venue_ap_clients" => ApVector("42", "35", "28", "31"),
+            "venue_ap_channel_utilization_ratio" => ApVector("0.55", "0.48", "0.41", "0.46"),
+            "venue_ap_management_latency_seconds" => ApVector("0.018", "0.016", "0.015", "0.017"),
+            "venue_ap_management_packet_loss_ratio" => ApVector("0.002", "0.001", "0.001", "0.002"),
+            "zone:venue_ap_operational:avg" => VectorOf(
+                Sample("1", ("zone", "zone-a")),
+                Sample("1", ("zone", "zone-b"))),
+            "zone:venue_ap_clients:sum" => VectorOf(
+                Sample("77", ("zone", "zone-a")),
+                Sample("59", ("zone", "zone-b"))),
+            "up{job=\"venue-ap-simulator\"}" => Vector("1", ("job", "venue-ap-simulator")),
+            "probe_success{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("1"),
+            "probe_duration_seconds{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("0.012"),
+            "probe_http_status_code{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("200"),
+            "ALERTS{alertname=\"VenueApDown\"}" => EmptyVector(),
+            _ => throw new InvalidOperationException($"Unexpected query: {expression}")
+        });
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://prometheus:9090") };
+        var client = new PrometheusClient(httpClient);
+
+        var result = await client.GetOperationsOverviewAsync(CancellationToken.None);
+
+        Assert.Equal(4, result.AccessPoints.Count);
+        var ap001 = Assert.Single(result.AccessPoints, accessPoint => accessPoint.ApId == "ap-001");
+        Assert.True(ap001.Operational);
+        Assert.Equal(42, ap001.Clients);
+        Assert.Equal(0.55, ap001.ChannelUtilizationRatio);
+        Assert.Equal("inactive", ap001.AlertState);
+        Assert.Equal("simulated", ap001.Source);
+
+        Assert.Equal(2, result.Zones.Count);
+        var zoneA = Assert.Single(result.Zones, zone => zone.Zone == "zone-a");
+        Assert.Equal(1, zoneA.OperationalRatio);
+        Assert.Equal(77, zoneA.Clients);
+        Assert.Equal("derived", zoneA.Source);
+        Assert.True(result.Probe.Success);
+        Assert.True(result.SimulatorScrape.Up);
+    }
+
+    [Fact]
+    public async Task OfflineAccessPointKeepsIdentityAndUsesNullForUnavailableObservations()
+    {
+        var handler = new StubPrometheusHandler(expression => expression switch
+        {
+            "venue_ap_operational" => ApVector("0", "1", "1", "1"),
+            "venue_ap_clients" => ApVector("0", "35", "28", "31"),
+            "venue_ap_channel_utilization_ratio" => ApVectorFromAp002("0.48", "0.41", "0.46"),
+            "venue_ap_management_latency_seconds" => ApVectorFromAp002("0.016", "0.015", "0.017"),
+            "venue_ap_management_packet_loss_ratio" => ApVectorFromAp002("0.001", "0.001", "0.002"),
+            "zone:venue_ap_operational:avg" => VectorOf(
+                Sample("0.5", ("zone", "zone-a")),
+                Sample("1", ("zone", "zone-b"))),
+            "zone:venue_ap_clients:sum" => VectorOf(
+                Sample("35", ("zone", "zone-a")),
+                Sample("59", ("zone", "zone-b"))),
+            "up{job=\"venue-ap-simulator\"}" => Vector("1"),
+            "probe_success{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("1"),
+            "probe_duration_seconds{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("0.012"),
+            "probe_http_status_code{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("200"),
+            "ALERTS{alertname=\"VenueApDown\"}" => Vector(
+                "1",
+                ("alertname", "VenueApDown"),
+                ("alertstate", "firing"),
+                ("ap_id", "ap-001"),
+                ("zone", "zone-a")),
+            _ => throw new InvalidOperationException($"Unexpected query: {expression}")
+        });
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://prometheus:9090") };
+        var client = new PrometheusClient(httpClient);
+
+        var result = await client.GetOperationsOverviewAsync(CancellationToken.None);
+
+        var ap001 = Assert.Single(result.AccessPoints, accessPoint => accessPoint.ApId == "ap-001");
+        Assert.False(ap001.Operational);
+        Assert.Equal(0, ap001.Clients);
+        Assert.Null(ap001.ChannelUtilizationRatio);
+        Assert.Null(ap001.ManagementLatencySeconds);
+        Assert.Null(ap001.ManagementPacketLossRatio);
+        Assert.Equal("firing", ap001.AlertState);
+    }
+
+    [Fact]
+    public async Task MissingRequiredOverviewSeriesFailsInsteadOfReturningPartialData()
+    {
+        var handler = new StubPrometheusHandler(expression => expression switch
+        {
+            "venue_ap_operational" => ApVector("1", "1", "1", "1"),
+            "venue_ap_clients" => EmptyVector(),
+            "venue_ap_channel_utilization_ratio" => ApVector("0.55", "0.48", "0.41", "0.46"),
+            "venue_ap_management_latency_seconds" => ApVector("0.018", "0.016", "0.015", "0.017"),
+            "venue_ap_management_packet_loss_ratio" => ApVector("0.002", "0.001", "0.001", "0.002"),
+            "zone:venue_ap_operational:avg" => VectorOf(
+                Sample("1", ("zone", "zone-a")),
+                Sample("1", ("zone", "zone-b"))),
+            "zone:venue_ap_clients:sum" => VectorOf(
+                Sample("77", ("zone", "zone-a")),
+                Sample("59", ("zone", "zone-b"))),
+            "up{job=\"venue-ap-simulator\"}" => Vector("1"),
+            "probe_success{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("1"),
+            "probe_duration_seconds{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("0.012"),
+            "probe_http_status_code{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("200"),
+            "ALERTS{alertname=\"VenueApDown\"}" => EmptyVector(),
+            _ => EmptyVector()
+        });
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://prometheus:9090") };
+        var client = new PrometheusClient(httpClient);
+
+        var exception = await Assert.ThrowsAsync<PrometheusQueryException>(
+            () => client.GetOperationsOverviewAsync(CancellationToken.None));
+
+        Assert.Contains("venue_ap_clients", exception.Message);
+    }
+
+    [Fact]
     public async Task MapsFixedPrometheusQueriesIntoViabilityResponse()
     {
         var handler = new StubPrometheusHandler(expression => expression switch
@@ -71,10 +190,42 @@ public sealed class PrometheusClientTests
             "\"]}]}}";
     }
 
+    private static string VectorOf(params StubSample[] samples)
+    {
+        var results = string.Join(",", samples.Select(sample =>
+        {
+            var metric = string.Join(",", sample.Labels.Select(label =>
+                $"\"{label.Key}\":\"{label.Value}\""));
+            return "{\"metric\":{" + metric + "},\"value\":[1787750400.0,\"" + sample.Value + "\"]}";
+        }));
+
+        return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[" + results + "]}}";
+    }
+
+    private static StubSample Sample(string value, params (string Key, string Value)[] labels) =>
+        new(value, labels);
+
+    private static string ApVector(string ap001, string ap002, string ap003, string ap004) =>
+        VectorOf(
+            Sample(ap001, ("ap_id", "ap-001"), ("zone", "zone-a")),
+            Sample(ap002, ("ap_id", "ap-002"), ("zone", "zone-a")),
+            Sample(ap003, ("ap_id", "ap-003"), ("zone", "zone-b")),
+            Sample(ap004, ("ap_id", "ap-004"), ("zone", "zone-b")));
+
+    private static string ApVectorFromAp002(string ap002, string ap003, string ap004) =>
+        VectorOf(
+            Sample(ap002, ("ap_id", "ap-002"), ("zone", "zone-a")),
+            Sample(ap003, ("ap_id", "ap-003"), ("zone", "zone-b")),
+            Sample(ap004, ("ap_id", "ap-004"), ("zone", "zone-b")));
+
     private static string EmptyVector() =>
         """
         {"status":"success","data":{"resultType":"vector","result":[]}}
         """;
+
+    private sealed record StubSample(
+        string Value,
+        IReadOnlyList<(string Key, string Value)> Labels);
 
     private sealed class StubPrometheusHandler(Func<string, string> responseFactory) : HttpMessageHandler
     {

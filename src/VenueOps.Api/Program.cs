@@ -40,4 +40,24 @@ app.MapGet("/api/viability", async (PrometheusClient prometheus, CancellationTok
     }
 });
 
+app.MapGet(
+    "/api/operations/overview",
+    async (PrometheusClient prometheus, CancellationToken cancellationToken) =>
+    {
+        try
+        {
+            var response = await prometheus.GetOperationsOverviewAsync(cancellationToken);
+            return Results.Ok(response);
+        }
+        catch (Exception exception) when (exception is PrometheusQueryException
+            or HttpRequestException
+            or TaskCanceledException)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Prometheus telemetry is unavailable",
+                detail: exception.Message);
+        }
+    });
+
 app.Run();

@@ -97,6 +97,220 @@ public sealed class PrometheusClient(HttpClient httpClient)
             new AlertObservation("VenueApDown", alertState, "derived"));
     }
 
+    public async Task<OperationsOverviewResponse> GetOperationsOverviewAsync(
+        CancellationToken cancellationToken)
+    {
+        var operationalTask = QueryVectorAsync("venue_ap_operational", cancellationToken);
+        var clientsTask = QueryVectorAsync("venue_ap_clients", cancellationToken);
+        var channelUtilizationTask = QueryVectorAsync(
+            "venue_ap_channel_utilization_ratio",
+            cancellationToken);
+        var managementLatencyTask = QueryVectorAsync(
+            "venue_ap_management_latency_seconds",
+            cancellationToken);
+        var managementPacketLossTask = QueryVectorAsync(
+            "venue_ap_management_packet_loss_ratio",
+            cancellationToken);
+        var zoneOperationalTask = QueryVectorAsync(
+            "zone:venue_ap_operational:avg",
+            cancellationToken);
+        var zoneClientsTask = QueryVectorAsync(
+            "zone:venue_ap_clients:sum",
+            cancellationToken);
+        var scrapeTask = QuerySingleAsync(
+            "up{job=\"venue-ap-simulator\"}",
+            "simulator scrape metric",
+            cancellationToken);
+        var probeSuccessTask = QuerySingleAsync(
+            $"probe_success{{job=\"blackbox-http\",instance=\"{ProbeTarget}\"}}",
+            "Blackbox probe success metric",
+            cancellationToken);
+        var probeDurationTask = QuerySingleAsync(
+            $"probe_duration_seconds{{job=\"blackbox-http\",instance=\"{ProbeTarget}\"}}",
+            "Blackbox probe duration metric",
+            cancellationToken);
+        var probeStatusTask = QuerySingleAsync(
+            $"probe_http_status_code{{job=\"blackbox-http\",instance=\"{ProbeTarget}\"}}",
+            "Blackbox HTTP status metric",
+            cancellationToken);
+        var alertsTask = QueryVectorAsync(
+            "ALERTS{alertname=\"VenueApDown\"}",
+            cancellationToken);
+
+        await Task.WhenAll(
+            operationalTask,
+            clientsTask,
+            channelUtilizationTask,
+            managementLatencyTask,
+            managementPacketLossTask,
+            zoneOperationalTask,
+            zoneClientsTask,
+            scrapeTask,
+            probeSuccessTask,
+            probeDurationTask,
+            probeStatusTask,
+            alertsTask);
+
+        var operational = IndexAccessPointSamples(
+            await operationalTask,
+            "venue_ap_operational");
+        if (operational.Count != 4)
+        {
+            throw new PrometheusQueryException(
+                $"Expected four venue_ap_operational series, but received {operational.Count}.");
+        }
+
+        var clients = IndexAccessPointSamples(await clientsTask, "venue_ap_clients");
+        var channelUtilization = IndexAccessPointSamples(
+            await channelUtilizationTask,
+            "venue_ap_channel_utilization_ratio");
+        var managementLatency = IndexAccessPointSamples(
+            await managementLatencyTask,
+            "venue_ap_management_latency_seconds");
+        var managementPacketLoss = IndexAccessPointSamples(
+            await managementPacketLossTask,
+            "venue_ap_management_packet_loss_ratio");
+
+        EnsureExactAccessPointSet(operational.Keys, clients.Keys, "venue_ap_clients");
+        EnsureNoUnknownAccessPoints(
+            operational.Keys,
+            channelUtilization.Keys,
+            "venue_ap_channel_utilization_ratio");
+        EnsureNoUnknownAccessPoints(
+            operational.Keys,
+            managementLatency.Keys,
+            "venue_ap_management_latency_seconds");
+        EnsureNoUnknownAccessPoints(
+            operational.Keys,
+            managementPacketLoss.Keys,
+            "venue_ap_management_packet_loss_ratio");
+
+        var alertStates = IndexAlertStates(await alertsTask, operational.Keys);
+        var accessPoints = operational
+            .OrderBy(pair => pair.Key.ApId, StringComparer.Ordinal)
+            .Select(pair =>
+            {
+                var key = pair.Key;
+                var operationalSample = pair.Value;
+                EnsureBinary(operationalSample.Value, "venue_ap_operational");
+                var isOperational = operationalSample.Value == 1;
+
+                var clientSample = clients[key];
+                var clientCount = ReadNonNegativeWholeNumber(
+                    clientSample.Value,
+                    "venue_ap_clients");
+
+                double? channelUtilizationRatio = null;
+                double? managementLatencySeconds = null;
+                double? managementPacketLossRatio = null;
+
+                if (isOperational)
+                {
+                    var channelSample = ReadRequiredAccessPointSample(
+                        channelUtilization,
+                        key,
+                        "venue_ap_channel_utilization_ratio");
+                    EnsureRatio(
+                        channelSample.Value,
+                        "venue_ap_channel_utilization_ratio");
+                    channelUtilizationRatio = channelSample.Value;
+
+                    var latencySample = ReadRequiredAccessPointSample(
+                        managementLatency,
+                        key,
+                        "venue_ap_management_latency_seconds");
+                    if (latencySample.Value < 0)
+                    {
+                        throw new PrometheusQueryException(
+                            "venue_ap_management_latency_seconds cannot be negative.");
+                    }
+
+                    managementLatencySeconds = latencySample.Value;
+
+                    var lossSample = ReadRequiredAccessPointSample(
+                        managementPacketLoss,
+                        key,
+                        "venue_ap_management_packet_loss_ratio");
+                    EnsureRatio(
+                        lossSample.Value,
+                        "venue_ap_management_packet_loss_ratio");
+                    managementPacketLossRatio = lossSample.Value;
+                }
+
+                var alertState = alertStates.GetValueOrDefault(key, "inactive");
+
+                return new OperationsAccessPointObservation(
+                    key.ApId,
+                    key.Zone,
+                    isOperational,
+                    clientCount,
+                    channelUtilizationRatio,
+                    managementLatencySeconds,
+                    managementPacketLossRatio,
+                    alertState,
+                    "simulated",
+                    operationalSample.ObservedAtUtc);
+            })
+            .ToArray();
+
+        var zoneOperational = IndexZoneSamples(
+            await zoneOperationalTask,
+            "zone:venue_ap_operational:avg");
+        var zoneClients = IndexZoneSamples(
+            await zoneClientsTask,
+            "zone:venue_ap_clients:sum");
+        if (zoneOperational.Count != 2)
+        {
+            throw new PrometheusQueryException(
+                $"Expected two zone:venue_ap_operational:avg series, but received {zoneOperational.Count}.");
+        }
+
+        EnsureExactZoneSet(
+            zoneOperational.Keys,
+            zoneClients.Keys,
+            "zone:venue_ap_clients:sum");
+        EnsureExactZoneSet(
+            operational.Keys.Select(key => key.Zone).Distinct(StringComparer.Ordinal),
+            zoneOperational.Keys,
+            "zone:venue_ap_operational:avg");
+
+        var zones = zoneOperational
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair =>
+            {
+                EnsureRatio(pair.Value.Value, "zone:venue_ap_operational:avg");
+                var clientsSample = zoneClients[pair.Key];
+                var clientCount = ReadNonNegativeWholeNumber(
+                    clientsSample.Value,
+                    "zone:venue_ap_clients:sum");
+
+                return new OperationsZoneObservation(
+                    pair.Key,
+                    pair.Value.Value,
+                    clientCount,
+                    "derived",
+                    pair.Value.ObservedAtUtc);
+            })
+            .ToArray();
+
+        var scrape = await scrapeTask;
+        EnsureBinary(scrape.Value, "up");
+
+        return new OperationsOverviewResponse(
+            DateTimeOffset.UtcNow,
+            accessPoints,
+            zones,
+            BuildProbeObservation(
+                await probeSuccessTask,
+                await probeDurationTask,
+                await probeStatusTask),
+            new ScrapeObservation(
+                scrape.Value == 1,
+                scrape.Value,
+                "measured",
+                scrape.ObservedAtUtc));
+    }
+
     private async Task<PrometheusSample> QuerySingleAsync(
         string expression,
         string description,
@@ -216,6 +430,183 @@ public sealed class PrometheusClient(HttpClient httpClient)
         return state;
     }
 
+    private static Dictionary<AccessPointSeriesKey, PrometheusSample> IndexAccessPointSamples(
+        IReadOnlyList<PrometheusSample> samples,
+        string metric)
+    {
+        var indexed = new Dictionary<AccessPointSeriesKey, PrometheusSample>();
+
+        foreach (var sample in samples)
+        {
+            var key = new AccessPointSeriesKey(
+                ReadRequiredLabel(sample, "ap_id", metric),
+                ReadRequiredLabel(sample, "zone", metric));
+            if (!indexed.TryAdd(key, sample))
+            {
+                throw new PrometheusQueryException(
+                    $"{metric} returned duplicate series for {key.ApId} in {key.Zone}.");
+            }
+        }
+
+        return indexed;
+    }
+
+    private static Dictionary<string, PrometheusSample> IndexZoneSamples(
+        IReadOnlyList<PrometheusSample> samples,
+        string metric)
+    {
+        var indexed = new Dictionary<string, PrometheusSample>(StringComparer.Ordinal);
+
+        foreach (var sample in samples)
+        {
+            var zone = ReadRequiredLabel(sample, "zone", metric);
+            if (!indexed.TryAdd(zone, sample))
+            {
+                throw new PrometheusQueryException(
+                    $"{metric} returned duplicate series for {zone}.");
+            }
+        }
+
+        return indexed;
+    }
+
+    private static Dictionary<AccessPointSeriesKey, string> IndexAlertStates(
+        IReadOnlyList<PrometheusSample> alerts,
+        IEnumerable<AccessPointSeriesKey> knownAccessPoints)
+    {
+        var known = knownAccessPoints.ToHashSet();
+        var states = new Dictionary<AccessPointSeriesKey, string>();
+
+        foreach (var alert in alerts)
+        {
+            var key = new AccessPointSeriesKey(
+                ReadRequiredLabel(alert, "ap_id", "VenueApDown alert"),
+                ReadRequiredLabel(alert, "zone", "VenueApDown alert"));
+            if (!known.Contains(key))
+            {
+                throw new PrometheusQueryException(
+                    $"VenueApDown returned an unknown access point {key.ApId} in {key.Zone}.");
+            }
+
+            if (alert.Value != 1)
+            {
+                throw new PrometheusQueryException(
+                    "Prometheus returned an invalid VenueApDown alert value.");
+            }
+
+            var state = ReadRequiredLabel(alert, "alertstate", "VenueApDown alert");
+            if (state is not ("pending" or "firing"))
+            {
+                throw new PrometheusQueryException(
+                    $"Prometheus returned unknown alert state '{state}'.");
+            }
+
+            if (!states.TryAdd(key, state))
+            {
+                throw new PrometheusQueryException(
+                    $"Prometheus returned duplicate VenueApDown alerts for {key.ApId}.");
+            }
+        }
+
+        return states;
+    }
+
+    private static void EnsureExactAccessPointSet(
+        IEnumerable<AccessPointSeriesKey> expected,
+        IEnumerable<AccessPointSeriesKey> actual,
+        string metric)
+    {
+        var expectedSet = expected.ToHashSet();
+        var actualSet = actual.ToHashSet();
+        if (!expectedSet.SetEquals(actualSet))
+        {
+            throw new PrometheusQueryException(
+                $"{metric} did not contain exactly the access points reported by venue_ap_operational.");
+        }
+    }
+
+    private static void EnsureNoUnknownAccessPoints(
+        IEnumerable<AccessPointSeriesKey> expected,
+        IEnumerable<AccessPointSeriesKey> actual,
+        string metric)
+    {
+        var expectedSet = expected.ToHashSet();
+        if (actual.Any(key => !expectedSet.Contains(key)))
+        {
+            throw new PrometheusQueryException(
+                $"{metric} returned an access point not present in venue_ap_operational.");
+        }
+    }
+
+    private static void EnsureExactZoneSet(
+        IEnumerable<string> expected,
+        IEnumerable<string> actual,
+        string metric)
+    {
+        var expectedSet = expected.ToHashSet(StringComparer.Ordinal);
+        var actualSet = actual.ToHashSet(StringComparer.Ordinal);
+        if (!expectedSet.SetEquals(actualSet))
+        {
+            throw new PrometheusQueryException(
+                $"{metric} did not contain exactly the expected zones.");
+        }
+    }
+
+    private static PrometheusSample ReadRequiredAccessPointSample(
+        IReadOnlyDictionary<AccessPointSeriesKey, PrometheusSample> samples,
+        AccessPointSeriesKey key,
+        string metric)
+    {
+        if (!samples.TryGetValue(key, out var sample))
+        {
+            throw new PrometheusQueryException(
+                $"{metric} omitted operational access point {key.ApId} in {key.Zone}.");
+        }
+
+        return sample;
+    }
+
+    private static int ReadNonNegativeWholeNumber(double value, string metric)
+    {
+        if (value < 0 || value != Math.Truncate(value) || value > int.MaxValue)
+        {
+            throw new PrometheusQueryException(
+                $"{metric} must be a non-negative whole number.");
+        }
+
+        return checked((int)value);
+    }
+
+    private static ProbeObservation BuildProbeObservation(
+        PrometheusSample probeSuccess,
+        PrometheusSample probeDuration,
+        PrometheusSample probeStatus)
+    {
+        EnsureBinary(probeSuccess.Value, "probe_success");
+        if (probeDuration.Value < 0)
+        {
+            throw new PrometheusQueryException("probe_duration_seconds cannot be negative.");
+        }
+
+        var invalidStatusCode = probeStatus.Value < 0
+            || probeStatus.Value > 599
+            || probeStatus.Value != Math.Truncate(probeStatus.Value)
+            || (probeSuccess.Value == 1 && probeStatus.Value < 100);
+        if (invalidStatusCode)
+        {
+            throw new PrometheusQueryException(
+                "probe_http_status_code was not a valid HTTP status code.");
+        }
+
+        return new ProbeObservation(
+            ProbeTarget,
+            probeSuccess.Value == 1,
+            probeDuration.Value,
+            checked((int)probeStatus.Value),
+            "measured",
+            probeSuccess.ObservedAtUtc);
+    }
+
     private static string ReadRequiredLabel(
         PrometheusSample sample,
         string label,
@@ -257,6 +648,8 @@ public sealed class PrometheusClient(HttpClient httpClient)
     private sealed record PrometheusResult(
         [property: JsonPropertyName("metric")] IReadOnlyDictionary<string, string>? Metric,
         [property: JsonPropertyName("value")] JsonElement Value);
+
+    private readonly record struct AccessPointSeriesKey(string ApId, string Zone);
 }
 
 public sealed record PrometheusSample(
@@ -303,3 +696,29 @@ public sealed record ScrapeObservation(
     DateTimeOffset ObservedAtUtc);
 
 public sealed record AlertObservation(string Name, string State, string Source);
+
+public sealed record OperationsOverviewResponse(
+    DateTimeOffset GeneratedAtUtc,
+    IReadOnlyList<OperationsAccessPointObservation> AccessPoints,
+    IReadOnlyList<OperationsZoneObservation> Zones,
+    ProbeObservation Probe,
+    ScrapeObservation SimulatorScrape);
+
+public sealed record OperationsAccessPointObservation(
+    string ApId,
+    string Zone,
+    bool Operational,
+    int Clients,
+    double? ChannelUtilizationRatio,
+    double? ManagementLatencySeconds,
+    double? ManagementPacketLossRatio,
+    string AlertState,
+    string Source,
+    DateTimeOffset ObservedAtUtc);
+
+public sealed record OperationsZoneObservation(
+    string Zone,
+    double OperationalRatio,
+    int Clients,
+    string Source,
+    DateTimeOffset ObservedAtUtc);
