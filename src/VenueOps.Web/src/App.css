@@ -259,6 +259,134 @@ tbody tr:last-child td {
   background: var(--danger-row);
 }
 
+.history-heading-row {
+  align-items: flex-end;
+}
+
+.history-controls {
+  display: flex;
+  gap: 12px;
+}
+
+.history-controls label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.history-controls select {
+  min-width: 160px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 8px 32px 8px 10px;
+  color: var(--text);
+  background: var(--surface-raised);
+  font: inherit;
+}
+
+.history-controls select:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.history-panel {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.history-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--surface-subtle);
+}
+
+.history-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+  border-right: 1px solid var(--border);
+}
+
+.history-summary > div:last-child {
+  border-right: 0;
+}
+
+.history-summary span,
+.timeline-heading span,
+.timeline-legend {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.history-summary strong {
+  font-size: 1.25rem;
+}
+
+.timeline-block,
+.recent-history {
+  padding: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.timeline-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.state-timeline {
+  display: flex;
+  gap: 1px;
+  height: 26px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--border);
+}
+
+.state-timeline span {
+  min-width: 1px;
+  flex: 1 1 0;
+}
+
+.timeline-up,
+.legend-up {
+  background: #39905b;
+}
+
+.timeline-down,
+.legend-down {
+  background: #c34b4b;
+}
+
+.timeline-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 9px;
+}
+
+.timeline-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeline-legend i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.recent-history .table-scroll {
+  border-radius: 6px;
+}
+
 .provenance-note {
   margin-top: 24px;
   border-top: 1px solid var(--border);
@@ -283,7 +411,8 @@ tbody tr:last-child td {
   }
 
   .health-strip,
-  .zone-grid {
+  .zone-grid,
+  .history-summary {
     grid-template-columns: 1fr;
   }
 
@@ -293,6 +422,30 @@ tbody tr:last-child td {
   }
 
   .health-item:last-child {
+    border-bottom: 0;
+  }
+
+  .history-heading-row,
+  .timeline-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .history-controls {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .history-controls select {
+    width: 100%;
+  }
+
+  .history-summary > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .history-summary > div:last-child {
     border-bottom: 0;
   }
 }

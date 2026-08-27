@@ -4,6 +4,7 @@ import {
   type AccessPointObservation,
   type OperationsOverview,
 } from './api/operations'
+import { AccessPointHistoryPanel } from './components/AccessPointHistoryPanel'
 import './App.css'
 
 function App() {
@@ -43,7 +44,7 @@ function App() {
     <main className="app-shell">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Milestone 2 · Operations overview</p>
+          <p className="eyebrow">Milestone 3 · Historical telemetry</p>
           <h1>Venue Network Operations Console</h1>
           <p className="page-description">
             A minimal view of Prometheus-backed access point and zone telemetry.
@@ -155,6 +156,8 @@ function App() {
               </table>
             </div>
           </section>
+
+          <AccessPointHistoryPanel accessPoints={overview.accessPoints} />
 
           <footer className="provenance-note">
             <strong>Source key:</strong> AP and RF values are simulated; zone

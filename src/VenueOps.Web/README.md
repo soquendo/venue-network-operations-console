@@ -1,6 +1,6 @@
 # VenueOps.Web
 
-This is the deliberately small Milestone 2 React/TypeScript client. It polls the fixed Venue API operations-overview endpoint every five seconds and displays AP, zone, scrape, and HTTP probe status.
+This React/TypeScript client polls fixed Venue API endpoints every five seconds. It displays the Milestone 2 AP/zone operations overview and the Milestone 3 bounded AP history response, including explicit gaps for unavailable observations.
 
 Start the Docker monitoring stack from the repository root, then run:
 

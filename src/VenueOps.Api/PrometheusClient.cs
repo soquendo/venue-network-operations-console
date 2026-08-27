@@ -11,6 +11,14 @@ public sealed class PrometheusClient(HttpClient httpClient)
     private const string ProbeTarget = "http://venue-api:8080/health/live";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly IReadOnlyDictionary<string, HistoryWindowDefinition> HistoryWindows =
+        new Dictionary<string, HistoryWindowDefinition>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["15m"] = new("15m", TimeSpan.FromMinutes(15), 5),
+            ["1h"] = new("1h", TimeSpan.FromHours(1), 15),
+            ["6h"] = new("6h", TimeSpan.FromHours(6), 60),
+            ["24h"] = new("24h", TimeSpan.FromHours(24), 300)
+        };
 
     public async Task<ViabilityResponse> GetViabilityAsync(CancellationToken cancellationToken)
     {
@@ -311,6 +319,211 @@ public sealed class PrometheusClient(HttpClient httpClient)
                 scrape.ObservedAtUtc));
     }
 
+    public async Task<AccessPointHistoryResponse> GetAccessPointHistoryAsync(
+        string apId,
+        string? window,
+        CancellationToken cancellationToken)
+    {
+        var historyWindow = ReadHistoryWindow(window);
+        if (!IsSupportedAccessPointId(apId))
+        {
+            throw new AccessPointNotFoundException(apId);
+        }
+
+        var escapedApId = EscapePrometheusLabelValue(apId);
+        var identitySamples = await QueryVectorAsync(
+            $"venue_ap_operational{{ap_id=\"{escapedApId}\"}}",
+            cancellationToken);
+        if (identitySamples.Count == 0)
+        {
+            throw new AccessPointNotFoundException(apId);
+        }
+
+        if (identitySamples.Count != 1)
+        {
+            throw new PrometheusQueryException(
+                $"Expected one current operational series for {apId}, but received {identitySamples.Count}.");
+        }
+
+        var identity = identitySamples[0];
+        var returnedApId = ReadRequiredLabel(identity, "ap_id", "AP operational metric");
+        var zone = ReadRequiredLabel(identity, "zone", "AP operational metric");
+        if (!string.Equals(returnedApId, apId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new PrometheusQueryException(
+                $"Prometheus returned access point '{returnedApId}' when '{apId}' was requested.");
+        }
+
+        var endSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        endSeconds -= endSeconds % historyWindow.StepSeconds;
+        var end = DateTimeOffset.FromUnixTimeSeconds(endSeconds);
+        var start = end - historyWindow.Duration;
+        var selector =
+            $"ap_id=\"{EscapePrometheusLabelValue(returnedApId)}\",zone=\"{EscapePrometheusLabelValue(zone)}\"";
+
+        var operationalTask = QuerySingleRangeAsync(
+            $"venue_ap_operational{{{selector}}}",
+            "venue_ap_operational",
+            start,
+            end,
+            historyWindow.StepSeconds,
+            required: true,
+            cancellationToken);
+        var clientsTask = QuerySingleRangeAsync(
+            $"venue_ap_clients{{{selector}}}",
+            "venue_ap_clients",
+            start,
+            end,
+            historyWindow.StepSeconds,
+            required: true,
+            cancellationToken);
+        var channelUtilizationTask = QuerySingleRangeAsync(
+            $"venue_ap_channel_utilization_ratio{{{selector}}}",
+            "venue_ap_channel_utilization_ratio",
+            start,
+            end,
+            historyWindow.StepSeconds,
+            required: false,
+            cancellationToken);
+        var managementLatencyTask = QuerySingleRangeAsync(
+            $"venue_ap_management_latency_seconds{{{selector}}}",
+            "venue_ap_management_latency_seconds",
+            start,
+            end,
+            historyWindow.StepSeconds,
+            required: false,
+            cancellationToken);
+        var managementPacketLossTask = QuerySingleRangeAsync(
+            $"venue_ap_management_packet_loss_ratio{{{selector}}}",
+            "venue_ap_management_packet_loss_ratio",
+            start,
+            end,
+            historyWindow.StepSeconds,
+            required: false,
+            cancellationToken);
+
+        await Task.WhenAll(
+            operationalTask,
+            clientsTask,
+            channelUtilizationTask,
+            managementLatencyTask,
+            managementPacketLossTask);
+
+        var operational = await operationalTask
+            ?? throw new PrometheusQueryException("venue_ap_operational history was unavailable.");
+        var clients = await clientsTask
+            ?? throw new PrometheusQueryException("venue_ap_clients history was unavailable.");
+        var channelUtilization = await channelUtilizationTask;
+        var managementLatency = await managementLatencyTask;
+        var managementPacketLoss = await managementPacketLossTask;
+
+        EnsureRangeSeriesIdentity(operational, returnedApId, zone, "venue_ap_operational");
+        EnsureRangeSeriesIdentity(clients, returnedApId, zone, "venue_ap_clients");
+        EnsureOptionalRangeSeriesIdentity(
+            channelUtilization,
+            returnedApId,
+            zone,
+            "venue_ap_channel_utilization_ratio");
+        EnsureOptionalRangeSeriesIdentity(
+            managementLatency,
+            returnedApId,
+            zone,
+            "venue_ap_management_latency_seconds");
+        EnsureOptionalRangeSeriesIdentity(
+            managementPacketLoss,
+            returnedApId,
+            zone,
+            "venue_ap_management_packet_loss_ratio");
+
+        var clientsByTimestamp = IndexRangePoints(clients, "venue_ap_clients");
+        var channelByTimestamp = IndexOptionalRangePoints(
+            channelUtilization,
+            "venue_ap_channel_utilization_ratio");
+        var latencyByTimestamp = IndexOptionalRangePoints(
+            managementLatency,
+            "venue_ap_management_latency_seconds");
+        var lossByTimestamp = IndexOptionalRangePoints(
+            managementPacketLoss,
+            "venue_ap_management_packet_loss_ratio");
+
+        var samples = operational.Points
+            .OrderBy(point => point.ObservedAtUtc)
+            .Select(point =>
+            {
+                EnsureBinary(point.Value, "venue_ap_operational");
+                var isOperational = point.Value == 1;
+                var clientPoint = ReadRequiredRangePoint(
+                    clientsByTimestamp,
+                    point.ObservedAtUtc,
+                    "venue_ap_clients");
+                var clientCount = ReadNonNegativeWholeNumber(
+                    clientPoint.Value,
+                    "venue_ap_clients");
+
+                double? channelUtilizationRatio = null;
+                double? managementLatencySeconds = null;
+                double? managementPacketLossRatio = null;
+
+                if (isOperational)
+                {
+                    var channelPoint = ReadRequiredRangePoint(
+                        channelByTimestamp,
+                        point.ObservedAtUtc,
+                        "venue_ap_channel_utilization_ratio");
+                    EnsureRatio(
+                        channelPoint.Value,
+                        "venue_ap_channel_utilization_ratio");
+                    channelUtilizationRatio = channelPoint.Value;
+
+                    var latencyPoint = ReadRequiredRangePoint(
+                        latencyByTimestamp,
+                        point.ObservedAtUtc,
+                        "venue_ap_management_latency_seconds");
+                    if (latencyPoint.Value < 0)
+                    {
+                        throw new PrometheusQueryException(
+                            "venue_ap_management_latency_seconds cannot be negative.");
+                    }
+
+                    managementLatencySeconds = latencyPoint.Value;
+
+                    var lossPoint = ReadRequiredRangePoint(
+                        lossByTimestamp,
+                        point.ObservedAtUtc,
+                        "venue_ap_management_packet_loss_ratio");
+                    EnsureRatio(
+                        lossPoint.Value,
+                        "venue_ap_management_packet_loss_ratio");
+                    managementPacketLossRatio = lossPoint.Value;
+                }
+
+                return new AccessPointHistorySample(
+                    point.ObservedAtUtc,
+                    isOperational,
+                    clientCount,
+                    channelUtilizationRatio,
+                    managementLatencySeconds,
+                    managementPacketLossRatio);
+            })
+            .ToArray();
+
+        if (samples.Length == 0)
+        {
+            throw new PrometheusQueryException(
+                $"Prometheus returned no operational history for {returnedApId}.");
+        }
+
+        return new AccessPointHistoryResponse(
+            returnedApId,
+            zone,
+            historyWindow.Name,
+            start,
+            end,
+            historyWindow.StepSeconds,
+            "simulated",
+            samples);
+    }
+
     private async Task<PrometheusSample> QuerySingleAsync(
         string expression,
         string description,
@@ -370,14 +583,117 @@ public sealed class PrometheusClient(HttpClient httpClient)
         return envelope.Data.Result.Select(ParseSample).ToArray();
     }
 
+    private async Task<PrometheusRangeSeries?> QuerySingleRangeAsync(
+        string expression,
+        string description,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        int stepSeconds,
+        bool required,
+        CancellationToken cancellationToken)
+    {
+        var series = await QueryRangeAsync(
+            expression,
+            start,
+            end,
+            stepSeconds,
+            cancellationToken);
+
+        if (series.Count == 0 && !required)
+        {
+            return null;
+        }
+
+        if (series.Count != 1)
+        {
+            throw new PrometheusQueryException(
+                $"Expected exactly one series for {description} history, but received {series.Count}.");
+        }
+
+        return series[0];
+    }
+
+    private async Task<IReadOnlyList<PrometheusRangeSeries>> QueryRangeAsync(
+        string expression,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        int stepSeconds,
+        CancellationToken cancellationToken)
+    {
+        var requestUri =
+            $"/api/v1/query_range?query={Uri.EscapeDataString(expression)}" +
+            $"&start={start.ToUnixTimeSeconds()}" +
+            $"&end={end.ToUnixTimeSeconds()}" +
+            $"&step={stepSeconds}s";
+        using var response = await httpClient.GetAsync(requestUri, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new PrometheusQueryException(
+                $"Prometheus range query failed with HTTP status {(int)response.StatusCode}.");
+        }
+
+        await using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
+        PrometheusEnvelope? envelope;
+        try
+        {
+            envelope = await JsonSerializer.DeserializeAsync<PrometheusEnvelope>(
+                body,
+                JsonOptions,
+                cancellationToken);
+        }
+        catch (JsonException exception)
+        {
+            throw new PrometheusQueryException(
+                $"Prometheus returned invalid range-query JSON: {exception.Message}");
+        }
+
+        if (envelope?.Status != "success" || envelope.Data?.Result is null)
+        {
+            throw new PrometheusQueryException(
+                $"Prometheus rejected the range query: {envelope?.Error ?? "invalid response"}.");
+        }
+
+        if (envelope.Data.ResultType != "matrix")
+        {
+            throw new PrometheusQueryException(
+                $"Expected a Prometheus matrix result, but received '{envelope.Data.ResultType}'.");
+        }
+
+        return envelope.Data.Result.Select(ParseRangeSeries).ToArray();
+    }
+
     private static PrometheusSample ParseSample(PrometheusResult result)
     {
-        if (result.Value.ValueKind != JsonValueKind.Array)
+        var point = ParsePoint(result.Value);
+        return new PrometheusSample(
+            result.Metric ?? throw new PrometheusQueryException("Prometheus returned a sample without labels."),
+            point.Value,
+            point.ObservedAtUtc);
+    }
+
+    private static PrometheusRangeSeries ParseRangeSeries(PrometheusResult result)
+    {
+        if (result.Values.ValueKind != JsonValueKind.Array)
+        {
+            throw new PrometheusQueryException(
+                "Prometheus returned a malformed range-series value.");
+        }
+
+        return new PrometheusRangeSeries(
+            result.Metric ?? throw new PrometheusQueryException(
+                "Prometheus returned a range series without labels."),
+            result.Values.EnumerateArray().Select(ParsePoint).ToArray());
+    }
+
+    private static PrometheusPoint ParsePoint(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
         {
             throw new PrometheusQueryException("Prometheus returned a malformed sample value.");
         }
 
-        var values = result.Value.EnumerateArray().ToArray();
+        var values = element.EnumerateArray().ToArray();
         if (values.Length != 2 || !values[0].TryGetDouble(out var timestampSeconds))
         {
             throw new PrometheusQueryException("Prometheus returned a malformed sample tuple.");
@@ -385,7 +701,8 @@ public sealed class PrometheusClient(HttpClient httpClient)
 
         if (values[1].ValueKind != JsonValueKind.String)
         {
-            throw new PrometheusQueryException("Prometheus returned a sample value that was not a string.");
+            throw new PrometheusQueryException(
+                "Prometheus returned a sample value that was not a string.");
         }
 
         var rawValue = values[1].GetString();
@@ -393,14 +710,14 @@ public sealed class PrometheusClient(HttpClient httpClient)
             || !double.IsFinite(value)
             || !double.IsFinite(timestampSeconds))
         {
-            throw new PrometheusQueryException("Prometheus returned a non-finite or invalid sample.");
+            throw new PrometheusQueryException(
+                "Prometheus returned a non-finite or invalid sample.");
         }
 
         var timestampMilliseconds = checked((long)Math.Round(timestampSeconds * 1000));
-        return new PrometheusSample(
-            result.Metric ?? throw new PrometheusQueryException("Prometheus returned a sample without labels."),
-            value,
-            DateTimeOffset.FromUnixTimeMilliseconds(timestampMilliseconds));
+        return new PrometheusPoint(
+            DateTimeOffset.FromUnixTimeMilliseconds(timestampMilliseconds),
+            value);
     }
 
     private static string ReadAlertState(IReadOnlyList<PrometheusSample> alerts)
@@ -607,12 +924,104 @@ public sealed class PrometheusClient(HttpClient httpClient)
             probeSuccess.ObservedAtUtc);
     }
 
+    private static HistoryWindowDefinition ReadHistoryWindow(string? window)
+    {
+        var requestedWindow = string.IsNullOrWhiteSpace(window) ? "15m" : window.Trim();
+        if (!HistoryWindows.TryGetValue(requestedWindow, out var historyWindow))
+        {
+            throw new UnsupportedHistoryWindowException(requestedWindow);
+        }
+
+        return historyWindow;
+    }
+
+    private static bool IsSupportedAccessPointId(string apId) =>
+        !string.IsNullOrWhiteSpace(apId)
+        && apId.Length <= 64
+        && apId.All(character => char.IsAsciiLetterOrDigit(character) || character == '-');
+
+    private static string EscapePrometheusLabelValue(string value) =>
+        value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
+
+    private static void EnsureRangeSeriesIdentity(
+        PrometheusRangeSeries series,
+        string apId,
+        string zone,
+        string metric)
+    {
+        var returnedApId = ReadRequiredLabel(series.Metric, "ap_id", metric);
+        var returnedZone = ReadRequiredLabel(series.Metric, "zone", metric);
+        if (!string.Equals(returnedApId, apId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(returnedZone, zone, StringComparison.Ordinal))
+        {
+            throw new PrometheusQueryException(
+                $"{metric} history returned labels for an unexpected access point or zone.");
+        }
+    }
+
+    private static void EnsureOptionalRangeSeriesIdentity(
+        PrometheusRangeSeries? series,
+        string apId,
+        string zone,
+        string metric)
+    {
+        if (series is not null)
+        {
+            EnsureRangeSeriesIdentity(series, apId, zone, metric);
+        }
+    }
+
+    private static Dictionary<DateTimeOffset, PrometheusPoint> IndexRangePoints(
+        PrometheusRangeSeries series,
+        string metric)
+    {
+        var indexed = new Dictionary<DateTimeOffset, PrometheusPoint>();
+        foreach (var point in series.Points)
+        {
+            if (!indexed.TryAdd(point.ObservedAtUtc, point))
+            {
+                throw new PrometheusQueryException(
+                    $"{metric} history returned duplicate timestamp {point.ObservedAtUtc:O}.");
+            }
+        }
+
+        return indexed;
+    }
+
+    private static Dictionary<DateTimeOffset, PrometheusPoint> IndexOptionalRangePoints(
+        PrometheusRangeSeries? series,
+        string metric) =>
+        series is null ? [] : IndexRangePoints(series, metric);
+
+    private static PrometheusPoint ReadRequiredRangePoint(
+        IReadOnlyDictionary<DateTimeOffset, PrometheusPoint> points,
+        DateTimeOffset timestamp,
+        string metric)
+    {
+        if (!points.TryGetValue(timestamp, out var point))
+        {
+            throw new PrometheusQueryException(
+                $"{metric} history omitted required timestamp {timestamp:O}.");
+        }
+
+        return point;
+    }
+
     private static string ReadRequiredLabel(
         PrometheusSample sample,
         string label,
+        string description) =>
+        ReadRequiredLabel(sample.Metric, label, description);
+
+    private static string ReadRequiredLabel(
+        IReadOnlyDictionary<string, string> labels,
+        string label,
         string description)
     {
-        if (!sample.Metric.TryGetValue(label, out var value) || string.IsNullOrWhiteSpace(value))
+        if (!labels.TryGetValue(label, out var value) || string.IsNullOrWhiteSpace(value))
         {
             throw new PrometheusQueryException($"{description} did not include required label '{label}'.");
         }
@@ -647,9 +1056,23 @@ public sealed class PrometheusClient(HttpClient httpClient)
 
     private sealed record PrometheusResult(
         [property: JsonPropertyName("metric")] IReadOnlyDictionary<string, string>? Metric,
-        [property: JsonPropertyName("value")] JsonElement Value);
+        [property: JsonPropertyName("value")] JsonElement Value,
+        [property: JsonPropertyName("values")] JsonElement Values);
 
     private readonly record struct AccessPointSeriesKey(string ApId, string Zone);
+
+    private sealed record PrometheusRangeSeries(
+        IReadOnlyDictionary<string, string> Metric,
+        IReadOnlyList<PrometheusPoint> Points);
+
+    private sealed record PrometheusPoint(
+        DateTimeOffset ObservedAtUtc,
+        double Value);
+
+    private sealed record HistoryWindowDefinition(
+        string Name,
+        TimeSpan Duration,
+        int StepSeconds);
 }
 
 public sealed record PrometheusSample(
@@ -658,6 +1081,12 @@ public sealed record PrometheusSample(
     DateTimeOffset ObservedAtUtc);
 
 public sealed class PrometheusQueryException(string message) : Exception(message);
+
+public sealed class AccessPointNotFoundException(string apId)
+    : Exception($"Access point '{apId}' was not found in current Prometheus telemetry.");
+
+public sealed class UnsupportedHistoryWindowException(string window)
+    : Exception($"History window '{window}' is unsupported. Use 15m, 1h, 6h, or 24h.");
 
 public sealed record ViabilityResponse(
     DateTimeOffset GeneratedAtUtc,
@@ -722,3 +1151,21 @@ public sealed record OperationsZoneObservation(
     int Clients,
     string Source,
     DateTimeOffset ObservedAtUtc);
+
+public sealed record AccessPointHistoryResponse(
+    string ApId,
+    string Zone,
+    string Window,
+    DateTimeOffset StartUtc,
+    DateTimeOffset EndUtc,
+    int StepSeconds,
+    string Source,
+    IReadOnlyList<AccessPointHistorySample> Samples);
+
+public sealed record AccessPointHistorySample(
+    DateTimeOffset ObservedAtUtc,
+    bool Operational,
+    int Clients,
+    double? ChannelUtilizationRatio,
+    double? ManagementLatencySeconds,
+    double? ManagementPacketLossRatio);
