@@ -1,0 +1,19 @@
+groups:
+  - name: venue-network
+    interval: 5s
+    rules:
+      - record: zone:venue_ap_operational:avg
+        expr: avg by (zone) (venue_ap_operational)
+
+      - record: zone:venue_ap_clients:sum
+        expr: sum by (zone) (venue_ap_clients)
+
+      - alert: VenueApDown
+        expr: venue_ap_operational == 0
+        for: 10s
+        labels:
+          severity: critical
+          telemetry_source: simulated
+        annotations:
+          summary: "Simulated access point {{ $labels.ap_id }} is offline"
+          description: "The simulated controller has reported {{ $labels.ap_id }} in {{ $labels.zone }} offline for at least 10 seconds."
