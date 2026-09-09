@@ -131,6 +131,267 @@ public sealed class PrometheusHistoryClientTests
         Assert.Contains("venue_ap_clients", exception.Message);
     }
 
+    [Theory]
+    [Trait("Category", "PrometheusValidation")]
+    [InlineData("\"1787840000\"")]
+    [InlineData("null")]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    public async Task RejectsNonNumericHistoryTimestamps(string timestampJson)
+    {
+        var client = CreateClientWithRangeResponse(
+            "venue_ap_operational",
+            MatrixWithTimestamp(timestampJson, "1"));
+
+        await Assert.ThrowsAsync<PrometheusQueryException>(
+            () => client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None));
+    }
+
+    [Theory]
+    [Trait("Category", "PrometheusValidation")]
+    [InlineData("253402300800")]
+    [InlineData("-62135596801")]
+    [InlineData("253402300799.9995")]
+    [InlineData("-62135596800.0006")]
+    [InlineData("1e20")]
+    [InlineData("-1e20")]
+    [InlineData("1e308")]
+    [InlineData("-1e308")]
+    [InlineData("1e400")]
+    [InlineData("-1e400")]
+    public async Task RejectsUnrepresentableHistoryTimestamps(string timestampJson)
+    {
+        var client = CreateClientWithRangeResponse(
+            "venue_ap_operational",
+            MatrixWithTimestamp(timestampJson, "1"));
+
+        await Assert.ThrowsAsync<PrometheusQueryException>(
+            () => client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None));
+    }
+
+    [Theory]
+    [Trait("Category", "PrometheusValidation")]
+    [InlineData("null")]
+    [InlineData("""null,{"metric":{"ap_id":"ap-001","zone":"zone-a"},"values":[[1787840000,"1"]]}""")]
+    [InlineData("""{"metric":{"ap_id":"ap-001","zone":"zone-a"},"values":[[1787840000,"1"]]},null""")]
+    public async Task RejectsNullMatrixResultEntries(string resultsJson)
+    {
+        var client = CreateClientWithRangeResponse(
+            "venue_ap_operational",
+            $$$"""
+            {"status":"success","data":{"resultType":"matrix","result":[{{{resultsJson}}}]}}
+            """);
+
+        await Assert.ThrowsAsync<PrometheusQueryException>(
+            () => client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait("Category", "PrometheusValidation")]
+    public async Task RejectsUnexpectedHistoryResultType()
+    {
+        var client = CreateClientWithRangeResponse(
+            "venue_ap_operational",
+            Vector("1", ("ap_id", "ap-001"), ("zone", "zone-a")));
+
+        var exception = await Assert.ThrowsAsync<PrometheusQueryException>(
+            () => client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None));
+
+        Assert.Contains("Expected a Prometheus matrix result", exception.Message);
+    }
+
+    [Theory]
+    [Trait("Category", "PrometheusValidation")]
+    [InlineData("venue_ap_operational", "ap-002", "zone-a")]
+    [InlineData("venue_ap_clients", "ap-001", "zone-b")]
+    [InlineData("venue_ap_channel_utilization_ratio", "ap-002", "zone-a")]
+    [InlineData("venue_ap_management_latency_seconds", "ap-001", "zone-b")]
+    [InlineData("venue_ap_management_packet_loss_ratio", "ap-002", "zone-a")]
+    public async Task RejectsUnexpectedHistoryIdentities(string metric, string apId, string zone)
+    {
+        var client = CreateClientWithRangeResponse(
+            metric,
+            Matrix([("ap_id", apId), ("zone", zone)], [(FirstTimestamp, "1")]));
+
+        var exception = await Assert.ThrowsAsync<PrometheusQueryException>(
+            () => client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None));
+
+        Assert.Contains(metric, exception.Message);
+        Assert.Contains("unexpected access point or zone", exception.Message);
+    }
+
+    [Theory]
+    [Trait("Category", "PrometheusValidation")]
+    [InlineData("venue_ap_operational")]
+    [InlineData("venue_ap_clients")]
+    [InlineData("venue_ap_channel_utilization_ratio")]
+    [InlineData("venue_ap_management_latency_seconds")]
+    [InlineData("venue_ap_management_packet_loss_ratio")]
+    public async Task RejectsDuplicateHistoryTimestamps(string metric)
+    {
+        var client = CreateClientWithRangeResponse(
+            metric,
+            Matrix(
+                [("ap_id", "ap-001"), ("zone", "zone-a")],
+                [(FirstTimestamp, "1"), (FirstTimestamp, "1")]));
+
+        var exception = await Assert.ThrowsAsync<PrometheusQueryException>(
+            () => client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None));
+
+        Assert.Contains(metric, exception.Message);
+        Assert.Contains("duplicate timestamp", exception.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "PrometheusValidation")]
+    public async Task RejectsOperationalHistoryTimestampsThatRoundToSameMillisecond()
+    {
+        var client = CreateClientWithRangeResponse(
+            "venue_ap_operational",
+            """
+            {"status":"success","data":{"resultType":"matrix","result":[
+              {"metric":{"ap_id":"ap-001","zone":"zone-a"},
+               "values":[[1787840000.0001,"1"],[1787840000.0004,"1"]]}
+            ]}}
+            """);
+
+        var exception = await Assert.ThrowsAsync<PrometheusQueryException>(
+            () => client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None));
+
+        Assert.Contains("venue_ap_operational", exception.Message);
+        Assert.Contains("duplicate timestamp", exception.Message);
+    }
+
+    [Theory]
+    [Trait("Category", "PrometheusValidation")]
+    [InlineData("1787840000.125", 1787840000125L)]
+    [InlineData("1787840000.1234", 1787840000123L)]
+    [InlineData("1787840000.1236", 1787840000124L)]
+    [InlineData("0.0005", 0L)]
+    [InlineData("0.0015", 2L)]
+    [InlineData("-0.0005", 0L)]
+    [InlineData("-0.0015", -2L)]
+    [InlineData("-62135596800", -62135596800000L)]
+    [InlineData("253402300799.999", 253402300799999L)]
+    [InlineData("-62135596800.0004", -62135596800000L)]
+    [InlineData("253402300799.9994", 253402300799999L)]
+    public async Task PreservesHistoryTimestampMillisecondConversion(
+        string timestampJson,
+        long expectedMilliseconds)
+    {
+        var client = CreateHistoryClient((_, value) => MatrixWithTimestamp(timestampJson, value));
+
+        var result = await client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None);
+
+        var sample = Assert.Single(result.Samples);
+        Assert.Equal(
+            DateTimeOffset.FromUnixTimeMilliseconds(expectedMilliseconds),
+            sample.ObservedAtUtc);
+        Assert.True(sample.Operational);
+        Assert.Equal(42, sample.Clients);
+        Assert.Equal(0.55, sample.ChannelUtilizationRatio);
+        Assert.Equal(0.018, sample.ManagementLatencySeconds);
+        Assert.Equal(0.002, sample.ManagementPacketLossRatio);
+    }
+
+    [Fact]
+    [Trait("Category", "PrometheusValidation")]
+    public async Task PreservesSparseHistoryInTimestampOrder()
+    {
+        var client = CreateHistoryClient((metric, value) => Matrix(
+            [("ap_id", "ap-001"), ("zone", "zone-a")],
+            metric == "venue_ap_clients"
+                ? [(FirstTimestamp, "10"), (ThirdTimestamp, "20")]
+                : [(ThirdTimestamp, value), (FirstTimestamp, value)]));
+
+        var result = await client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None);
+
+        Assert.Collection(
+            result.Samples,
+            first =>
+            {
+                Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(FirstTimestamp), first.ObservedAtUtc);
+                Assert.Equal(10, first.Clients);
+            },
+            last =>
+            {
+                Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(ThirdTimestamp), last.ObservedAtUtc);
+                Assert.Equal(20, last.Clients);
+            });
+    }
+
+    [Fact]
+    [Trait("Category", "PrometheusValidation")]
+    public async Task PreservesNumericZeroForHealthyHistoryObservations()
+    {
+        var client = CreateHistoryClient((metric, _) => MatrixWithTimestamp(
+            "1787840000",
+            metric == "venue_ap_operational" ? "1" : "0"));
+
+        var result = await client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None);
+
+        var sample = Assert.Single(result.Samples);
+        Assert.True(sample.Operational);
+        Assert.Equal(0, sample.Clients);
+        Assert.Equal(0, sample.ChannelUtilizationRatio);
+        Assert.Equal(0, sample.ManagementLatencySeconds);
+        Assert.Equal(0, sample.ManagementPacketLossRatio);
+    }
+
+    [Fact]
+    [Trait("Category", "PrometheusValidation")]
+    public async Task OfflineHistoryAllowsMissingOptionalSeries()
+    {
+        var client = CreateHistoryClient((metric, _) =>
+            metric is "venue_ap_operational" or "venue_ap_clients"
+                ? MatrixWithTimestamp("1787840000", "0")
+                : """{"status":"success","data":{"resultType":"matrix","result":[]}}""");
+
+        var result = await client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None);
+
+        var sample = Assert.Single(result.Samples);
+        Assert.False(sample.Operational);
+        Assert.Equal(0, sample.Clients);
+        Assert.Null(sample.ChannelUtilizationRatio);
+        Assert.Null(sample.ManagementLatencySeconds);
+        Assert.Null(sample.ManagementPacketLossRatio);
+    }
+
+    private static PrometheusClient CreateClientWithRangeResponse(string metric, string response) =>
+        CreateHistoryClient((queriedMetric, value) => queriedMetric == metric
+            ? response
+            : MatrixWithTimestamp("1787840000", value));
+
+    private static PrometheusClient CreateHistoryClient(Func<string, string, string> rangeResponseFactory)
+    {
+        var handler = new StubPrometheusHandler((path, expression) => (path, expression) switch
+        {
+            ("/api/v1/query", "venue_ap_operational{ap_id=\"ap-001\"}") =>
+                Vector("1", ("ap_id", "ap-001"), ("zone", "zone-a")),
+            ("/api/v1/query_range", "venue_ap_operational{ap_id=\"ap-001\",zone=\"zone-a\"}") =>
+                rangeResponseFactory("venue_ap_operational", "1"),
+            ("/api/v1/query_range", "venue_ap_clients{ap_id=\"ap-001\",zone=\"zone-a\"}") =>
+                rangeResponseFactory("venue_ap_clients", "42"),
+            ("/api/v1/query_range", "venue_ap_channel_utilization_ratio{ap_id=\"ap-001\",zone=\"zone-a\"}") =>
+                rangeResponseFactory("venue_ap_channel_utilization_ratio", "0.55"),
+            ("/api/v1/query_range", "venue_ap_management_latency_seconds{ap_id=\"ap-001\",zone=\"zone-a\"}") =>
+                rangeResponseFactory("venue_ap_management_latency_seconds", "0.018"),
+            ("/api/v1/query_range", "venue_ap_management_packet_loss_ratio{ap_id=\"ap-001\",zone=\"zone-a\"}") =>
+                rangeResponseFactory("venue_ap_management_packet_loss_ratio", "0.002"),
+            _ => throw new InvalidOperationException($"Unexpected request: {path} {expression}")
+        });
+        return CreateClient(handler);
+    }
+
+    private static string MatrixWithTimestamp(string timestampJson, string value) =>
+        $$$"""
+        {"status":"success","data":{"resultType":"matrix","result":[
+          {"metric":{"ap_id":"ap-001","zone":"zone-a"},"values":[[{{{timestampJson}}},"{{{value}}}"]]}
+        ]}}
+        """;
+
     private static PrometheusClient CreateClient(HttpMessageHandler handler) =>
         new(new HttpClient(handler) { BaseAddress = new Uri("http://prometheus:9090") });
 

@@ -435,6 +435,7 @@ public sealed class PrometheusClient(HttpClient httpClient)
             zone,
             "venue_ap_management_packet_loss_ratio");
 
+        var operationalByTimestamp = IndexRangePoints(operational, "venue_ap_operational");
         var clientsByTimestamp = IndexRangePoints(clients, "venue_ap_clients");
         var channelByTimestamp = IndexOptionalRangePoints(
             channelUtilization,
@@ -446,7 +447,7 @@ public sealed class PrometheusClient(HttpClient httpClient)
             managementPacketLoss,
             "venue_ap_management_packet_loss_ratio");
 
-        var samples = operational.Points
+        var samples = operationalByTimestamp.Values
             .OrderBy(point => point.ObservedAtUtc)
             .Select(point =>
             {
@@ -663,8 +664,13 @@ public sealed class PrometheusClient(HttpClient httpClient)
         return envelope.Data.Result.Select(ParseRangeSeries).ToArray();
     }
 
-    private static PrometheusSample ParseSample(PrometheusResult result)
+    private static PrometheusSample ParseSample(PrometheusResult? result)
     {
+        if (result is null)
+        {
+            throw new PrometheusQueryException("Prometheus returned a null vector result.");
+        }
+
         var point = ParsePoint(result.Value);
         return new PrometheusSample(
             result.Metric ?? throw new PrometheusQueryException("Prometheus returned a sample without labels."),
@@ -672,8 +678,13 @@ public sealed class PrometheusClient(HttpClient httpClient)
             point.ObservedAtUtc);
     }
 
-    private static PrometheusRangeSeries ParseRangeSeries(PrometheusResult result)
+    private static PrometheusRangeSeries ParseRangeSeries(PrometheusResult? result)
     {
+        if (result is null)
+        {
+            throw new PrometheusQueryException("Prometheus returned a null matrix result.");
+        }
+
         if (result.Values.ValueKind != JsonValueKind.Array)
         {
             throw new PrometheusQueryException(
@@ -694,7 +705,9 @@ public sealed class PrometheusClient(HttpClient httpClient)
         }
 
         var values = element.EnumerateArray().ToArray();
-        if (values.Length != 2 || !values[0].TryGetDouble(out var timestampSeconds))
+        if (values.Length != 2
+            || values[0].ValueKind != JsonValueKind.Number
+            || !values[0].TryGetDouble(out var timestampSeconds))
         {
             throw new PrometheusQueryException("Prometheus returned a malformed sample tuple.");
         }
@@ -714,9 +727,16 @@ public sealed class PrometheusClient(HttpClient httpClient)
                 "Prometheus returned a non-finite or invalid sample.");
         }
 
-        var timestampMilliseconds = checked((long)Math.Round(timestampSeconds * 1000));
+        var timestampMilliseconds = Math.Round(timestampSeconds * 1000);
+        if (timestampMilliseconds < DateTimeOffset.MinValue.ToUnixTimeMilliseconds()
+            || timestampMilliseconds > DateTimeOffset.MaxValue.ToUnixTimeMilliseconds())
+        {
+            throw new PrometheusQueryException(
+                "Prometheus returned a sample timestamp outside the supported range.");
+        }
+
         return new PrometheusPoint(
-            DateTimeOffset.FromUnixTimeMilliseconds(timestampMilliseconds),
+            DateTimeOffset.FromUnixTimeMilliseconds(checked((long)timestampMilliseconds)),
             value);
     }
 
@@ -1052,7 +1072,7 @@ public sealed class PrometheusClient(HttpClient httpClient)
 
     private sealed record PrometheusData(
         [property: JsonPropertyName("resultType")] string ResultType,
-        [property: JsonPropertyName("result")] IReadOnlyList<PrometheusResult>? Result);
+        [property: JsonPropertyName("result")] IReadOnlyList<PrometheusResult?>? Result);
 
     private sealed record PrometheusResult(
         [property: JsonPropertyName("metric")] IReadOnlyDictionary<string, string>? Metric,
