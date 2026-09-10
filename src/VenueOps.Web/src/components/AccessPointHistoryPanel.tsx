@@ -14,40 +14,79 @@ const historyWindows: ReadonlyArray<{ value: HistoryWindow; label: string }> = [
   { value: '24h', label: 'Last 24 hours' },
 ]
 
+interface HistorySelection {
+  apId: string
+  window: HistoryWindow
+}
+
+interface HistoryState {
+  selection: HistorySelection
+  history: AccessPointHistory | null
+  error: string | null
+  isLoading: boolean
+}
+
 export function AccessPointHistoryPanel({
   accessPoints,
 }: {
   accessPoints: AccessPointObservation[]
 }) {
-  const [selectedApId, setSelectedApId] = useState(accessPoints[0]?.apId ?? '')
-  const [historyWindow, setHistoryWindow] = useState<HistoryWindow>('15m')
-  const [history, setHistory] = useState<AccessPointHistory | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  // A new selection object also distinguishes separate visits to the same AP/window.
+  const [selection, setSelection] = useState<HistorySelection>(() => ({
+    apId: accessPoints[0]?.apId ?? '',
+    window: '15m',
+  }))
+  const [state, setState] = useState<HistoryState>(() => ({
+    selection,
+    history: null,
+    error: null,
+    isLoading: true,
+  }))
+  const { apId: selectedApId, window: historyWindow } = selection
+  // Guard the render itself, before the new selection's effect has run.
+  const history = state.selection === selection ? state.history : null
+  const error = state.selection === selection ? state.error : null
+  const isLoading = state.selection === selection ? state.isLoading : true
 
   useEffect(() => {
-    const controller = new AbortController()
     let active = true
+    let currentRequest: AbortController | null = null
 
     const loadHistory = async () => {
-      setIsLoading(true)
+      if (!active || currentRequest) return
+      const controller = new AbortController()
+      currentRequest = controller
+      const ownsRequest = () => active && currentRequest === controller
+      setState((previous) => ({
+        selection,
+        history: previous.selection === selection ? previous.history : null,
+        error: previous.selection === selection ? previous.error : null,
+        isLoading: true,
+      }))
+
       try {
         const nextHistory = await getAccessPointHistory(
-          selectedApId,
-          historyWindow,
+          selection.apId,
+          selection.window,
           controller.signal,
         )
-        if (active) {
-          setHistory(nextHistory)
-          setError(null)
+        if (!ownsRequest()) return
+        if (nextHistory.apId !== selection.apId || nextHistory.window !== selection.window) {
+          // Reject mismatched content using the existing refresh-failure indicator.
+          throw new Error()
         }
+        setState({ selection, history: nextHistory, error: null, isLoading: true })
       } catch (requestError) {
-        if (active && requestError instanceof Error && requestError.name !== 'AbortError') {
-          setError(requestError.message)
+        if (ownsRequest()) {
+          setState((previous) => ({
+            ...previous,
+            error: requestError instanceof Error ? requestError.message : '',
+          }))
         }
       } finally {
-        if (active) {
-          setIsLoading(false)
+        if (ownsRequest()) {
+          currentRequest = null
+          setState((previous) => ({ ...previous, isLoading: false }))
         }
       }
     }
@@ -57,11 +96,11 @@ export function AccessPointHistoryPanel({
 
     return () => {
       active = false
-      controller.abort()
+      currentRequest?.abort()
       window.clearTimeout(initialLoadId)
       window.clearInterval(pollId)
     }
-  }, [selectedApId, historyWindow])
+  }, [selection])
 
   const summary = useMemo(() => summarizeHistory(history), [history])
   const recentSamples = history?.samples.slice(-12).reverse() ?? []
@@ -78,7 +117,10 @@ export function AccessPointHistoryPanel({
             <span>Access point</span>
             <select
               value={selectedApId}
-              onChange={(event) => setSelectedApId(event.target.value)}
+              onChange={(event) => {
+                const apId = event.target.value
+                setSelection((previous) => previous.apId === apId ? previous : { ...previous, apId })
+              }}
             >
               {accessPoints.map((accessPoint) => (
                 <option value={accessPoint.apId} key={accessPoint.apId}>
@@ -91,9 +133,10 @@ export function AccessPointHistoryPanel({
             <span>Time window</span>
             <select
               value={historyWindow}
-              onChange={(event) =>
-                setHistoryWindow(event.target.value as HistoryWindow)
-              }
+              onChange={(event) => {
+                const window = event.target.value as HistoryWindow
+                setSelection((previous) => previous.window === window ? previous : { ...previous, window })
+              }}
             >
               {historyWindows.map((historyWindow) => (
                 <option value={historyWindow.value} key={historyWindow.value}>
@@ -105,7 +148,7 @@ export function AccessPointHistoryPanel({
         </div>
       </div>
 
-      {error && (
+      {error !== null && (
         <div className="error-banner" role="alert">
           <strong>History refresh failed.</strong> {error}
           {history && ' Showing the most recent successful range response.'}

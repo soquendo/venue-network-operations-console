@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   getOperationsOverview,
   type AccessPointObservation,
@@ -11,34 +11,55 @@ function App() {
   const [overview, setOverview] = useState<OperationsOverview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-
-  const refresh = useCallback(async () => {
-    setIsLoading(true)
-
-    try {
-      const nextOverview = await getOperationsOverview()
-      setOverview(nextOverview)
-      setError(null)
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : 'The operations overview could not be loaded.',
-      )
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
+  const refreshRef = useRef<(() => Promise<void>) | null>(null)
 
   useEffect(() => {
+    let active = true
+    let currentRequest: AbortController | null = null
+
+    const refresh = async () => {
+      // Manual refresh and polling share this synchronous guard.
+      if (!active || currentRequest) return
+      const controller = new AbortController()
+      currentRequest = controller
+      const ownsRequest = () => active && currentRequest === controller
+      setIsLoading(true)
+
+      try {
+        const nextOverview = await getOperationsOverview(controller.signal)
+        if (ownsRequest()) {
+          setOverview(nextOverview)
+          setError(null)
+        }
+      } catch (requestError) {
+        if (ownsRequest()) {
+          setError(
+            requestError instanceof Error
+              ? requestError.message
+              : 'The operations overview could not be loaded.',
+          )
+        }
+      } finally {
+        if (ownsRequest()) {
+          currentRequest = null
+          setIsLoading(false)
+        }
+      }
+    }
+
+    refreshRef.current = refresh
     const initialLoadId = window.setTimeout(() => void refresh(), 0)
     const pollId = window.setInterval(() => void refresh(), 5_000)
 
     return () => {
+      // Invalidate first: an aborted request may still settle after cleanup.
+      active = false
+      currentRequest?.abort()
+      refreshRef.current = null
       window.clearTimeout(initialLoadId)
       window.clearInterval(pollId)
     }
-  }, [refresh])
+  }, [])
 
   return (
     <main className="app-shell">
@@ -53,14 +74,14 @@ function App() {
         <button
           type="button"
           className="refresh-button"
-          onClick={() => void refresh()}
+          onClick={() => void refreshRef.current?.()}
           disabled={isLoading}
         >
           {isLoading ? 'Refreshing…' : 'Refresh now'}
         </button>
       </header>
 
-      {error && (
+      {error !== null && (
         <div className="error-banner" role="alert">
           <strong>Telemetry refresh failed.</strong> {error}
           {overview && ' Showing the most recent successful response.'}

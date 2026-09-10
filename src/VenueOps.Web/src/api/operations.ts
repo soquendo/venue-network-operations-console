@@ -73,10 +73,11 @@ interface ProblemDetails {
   title?: string
 }
 
-export async function getOperationsOverview(): Promise<OperationsOverview> {
+export async function getOperationsOverview(signal?: AbortSignal): Promise<OperationsOverview> {
   const response = await fetch('/api/operations/overview', {
     headers: { Accept: 'application/json' },
     cache: 'no-store',
+    signal,
   })
 
   if (!response.ok) {
