@@ -17,3 +17,19 @@ groups:
         annotations:
           summary: "Simulated access point {{ $labels.ap_id }} is offline"
           description: "The simulated controller has reported {{ $labels.ap_id }} in {{ $labels.zone }} offline for at least 10 seconds."
+
+      - alert: VenueApDegraded
+        expr: >-
+          (venue_ap_operational == 1)
+          and (venue_ap_channel_utilization_ratio >= 0.80)
+          and (
+            (venue_ap_management_latency_seconds >= 0.050)
+            or (venue_ap_management_packet_loss_ratio >= 0.010)
+          )
+        for: 30s
+        labels:
+          severity: warning
+          telemetry_source: simulated
+        annotations:
+          summary: "Simulated access point {{ $labels.ap_id }} is degraded"
+          description: "The simulated controller has reported degraded management performance for {{ $labels.ap_id }} in {{ $labels.zone }} for at least 30 seconds."

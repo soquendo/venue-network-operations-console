@@ -128,6 +128,8 @@ export function makeAccessPoints(): AccessPointObservation[] {
     managementLatencySeconds: 0.018,
     managementPacketLossRatio: 0.002,
     alertState: 'inactive',
+    degraded: false,
+    degradationAlertState: 'inactive',
     source: 'simulated',
     observedAtUtc: '2026-09-10T12:00:00Z',
   }))
@@ -151,6 +153,7 @@ export function makeHistory(
     samples: [{
       observedAtUtc: endUtc,
       operational: true,
+      degraded: false,
       clients,
       channelUtilizationRatio: 0.55,
       managementLatencySeconds: 0.018,
@@ -168,6 +171,7 @@ export function makeOverview(clients = 42): OperationsOverview {
     zones: ['zone-a', 'zone-b'].map((zone) => ({
       zone,
       operationalRatio: 1,
+      degradedAccessPoints: 0,
       clients: accessPoints.filter((ap) => ap.zone === zone).reduce((sum, ap) => sum + ap.clients, 0),
       source: 'derived',
       observedAtUtc: '2026-09-10T12:00:00Z',

@@ -7,6 +7,63 @@ import type { OperationsOverview } from './api/operations'
 
 setupDomTests()
 
+describe('held event quality presentation', () => {
+  it('shows degraded operational APs and zones, healthy unaffected zones, and separate alerts', async () => {
+    const fetch = controlFetch()
+    const view = await render(<App />)
+    await advanceTime(0)
+    const overview = makeOverview()
+    Object.assign(overview.accessPoints[0], { degraded: true, degradationAlertState: 'pending' })
+    Object.assign(overview.accessPoints[1], { degraded: true, degradationAlertState: 'firing' })
+    Object.assign(overview.zones[0], { degradedAccessPoints: 2 })
+    await fetch.overview()[0].json(overview)
+    const rows = view.container.querySelectorAll('[aria-labelledby="aps-heading"] tbody tr')
+    expect(rows[0].querySelector('.status-badge')?.textContent).toBe('Degraded')
+    expect(rows[1].querySelector('.status-badge')?.textContent).toBe('Degraded')
+    expect(rows[2].querySelector('.status-badge')?.textContent).toBe('Healthy')
+    expect(rows[0].textContent).toContain('AP down')
+    expect(rows[0].textContent).toContain('Degradation')
+    expect(rows[0].querySelector('.alert-pending')?.textContent).toBe('pending')
+    expect(rows[1].querySelector('.alert-degradation.alert-firing')).not.toBeNull()
+    const zones = view.container.querySelectorAll('.zone-card')
+    expect(zones[0].querySelector('.status-badge')?.textContent).toBe('Degraded')
+    expect(zones[0].textContent).toContain('Degraded APs2')
+    expect(zones[1].querySelector('.status-badge')?.textContent).toBe('Healthy')
+  })
+
+  it('gives offline availability precedence over degraded flags for APs and zones', async () => {
+    const fetch = controlFetch()
+    const view = await render(<App />)
+    await advanceTime(0)
+    const overview = makeOverview()
+    Object.assign(overview.accessPoints[0], { operational: false, degraded: true, alertState: 'firing' })
+    Object.assign(overview.zones[0], { operationalRatio: 0.5, degradedAccessPoints: 1 })
+    await fetch.overview()[0].json(overview)
+    expect(view.container.querySelector('[aria-labelledby="aps-heading"] .status-badge')?.textContent).toBe('Offline')
+    expect(view.container.querySelector('.zone-card .status-badge')?.textContent).toBe('Offline')
+  })
+
+  it('retains degraded data with a refresh error and replaces it with healthy recovery', async () => {
+    const fetch = controlFetch()
+    const view = await render(<App />)
+    await advanceTime(0)
+    const peak = makeOverview()
+    Object.assign(peak.accessPoints[0], { degraded: true, degradationAlertState: 'firing' })
+    Object.assign(peak.zones[0], { degradedAccessPoints: 1 })
+    await fetch.overview()[0].json(peak)
+    await advanceTime(5_000)
+    await fetch.overview()[1].reject(new Error('refresh unavailable'))
+    expect(view.container.querySelector('.error-banner')?.textContent).toContain('refresh unavailable')
+    expect(view.container.querySelector('[aria-labelledby="aps-heading"] .status-badge')?.textContent).toBe('Degraded')
+    await advanceTime(5_000)
+    await fetch.overview()[2].json(makeOverview())
+    expect(view.container.querySelector('.error-banner')).toBeNull()
+    expect(view.container.querySelector('[aria-labelledby="aps-heading"] .status-badge')?.textContent).toBe('Healthy')
+    expect(view.container.querySelector('.zone-card .status-badge')?.textContent).toBe('Healthy')
+    expect(view.container.querySelector('.alert-degradation.alert-firing')).toBeNull()
+  })
+})
+
 function firstClientCount(container: HTMLElement) {
   return container.querySelector('[aria-labelledby="aps-heading"] tbody td:nth-child(4)')?.textContent
 }

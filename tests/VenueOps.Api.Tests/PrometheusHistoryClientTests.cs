@@ -7,6 +7,28 @@ namespace VenueOps.Api.Tests;
 
 public sealed class PrometheusHistoryClientTests
 {
+    [Fact]
+    public async Task DerivesQualityFromCollectedPeakAndRecoveryWithoutAddingSamples()
+    {
+        var values = new Dictionary<string, string[]>
+        {
+            ["venue_ap_operational"] = ["1", "1", "1"],
+            ["venue_ap_clients"] = ["42", "84", "63"],
+            ["venue_ap_channel_utilization_ratio"] = ["0.55", "0.95", "0.75"],
+            ["venue_ap_management_latency_seconds"] = ["0.018", "0.078", "0.038"],
+            ["venue_ap_management_packet_loss_ratio"] = ["0.002", "0.017", "0.002"]
+        };
+        var client = CreateHistoryClient((metric, _) => Matrix(
+            [("ap_id", "ap-001"), ("zone", "zone-a")],
+            [(FirstTimestamp, values[metric][0]), (SecondTimestamp, values[metric][1]), (ThirdTimestamp + 10, values[metric][2])]));
+        var history = await client.GetAccessPointHistoryAsync("ap-001", "15m", CancellationToken.None);
+        Assert.Equal(3, history.Samples.Count);
+        Assert.Equal(new[] { FirstTimestamp, SecondTimestamp, ThirdTimestamp + 10 }, history.Samples.Select(sample => sample.ObservedAtUtc.ToUnixTimeSeconds()));
+        Assert.All(history.Samples, sample => Assert.True(sample.Operational));
+        var json = System.Text.Json.JsonSerializer.SerializeToElement(history, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.Equal(new[] { false, true, false }, json.GetProperty("samples").EnumerateArray().Select(sample => sample.GetProperty("degraded").GetBoolean()));
+    }
+
     private const long FirstTimestamp = 1_787_840_000;
     private const long SecondTimestamp = FirstTimestamp + 5;
     private const long ThirdTimestamp = FirstTimestamp + 10;

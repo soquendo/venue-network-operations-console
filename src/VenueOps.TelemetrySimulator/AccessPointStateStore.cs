@@ -3,24 +3,58 @@ namespace VenueOps.TelemetrySimulator;
 public sealed class AccessPointStateStore
 {
     private readonly Lock _lock = new();
+    private EventDayPosition? _heldPosition;
     private readonly Dictionary<string, AccessPointState> _accessPoints = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["ap-001"] = new("ap-001", "zone-a", 42, 0.55, 0.018, 0.002),
-        ["ap-002"] = new("ap-002", "zone-a", 35, 0.48, 0.016, 0.001),
-        ["ap-003"] = new("ap-003", "zone-b", 28, 0.41, 0.015, 0.001),
-        ["ap-004"] = new("ap-004", "zone-b", 31, 0.46, 0.017, 0.002)
+        ["ap-001"] = new(new("ap-001", "zone-a", 42, 0.55m, 0.018m, 0.002m)),
+        ["ap-002"] = new(new("ap-002", "zone-a", 35, 0.48m, 0.016m, 0.001m)),
+        ["ap-003"] = new(new("ap-003", "zone-b", 28, 0.41m, 0.015m, 0.001m)),
+        ["ap-004"] = new(new("ap-004", "zone-b", 31, 0.46m, 0.017m, 0.002m))
     };
 
     public IReadOnlyList<AccessPointSnapshot> GetAll()
     {
         lock (_lock)
         {
-            return _accessPoints.Values
-                .OrderBy(accessPoint => accessPoint.ApId, StringComparer.Ordinal)
-                .Select(accessPoint => accessPoint.ToSnapshot())
-                .ToArray();
+            return SnapshotAccessPoints();
         }
     }
+
+    public EventDaySnapshot GetEventDay()
+    {
+        lock (_lock) return SnapshotEventDay();
+    }
+
+    public EventDaySnapshot SetEventPosition(int elapsedMinutes)
+    {
+        var position = EventDayScenario.Evaluate(elapsedMinutes);
+        lock (_lock)
+        {
+            _heldPosition = position;
+            return SnapshotEventDay();
+        }
+    }
+
+    public EventDaySnapshot ResetEventDay()
+    {
+        lock (_lock)
+        {
+            _heldPosition = null;
+            foreach (var accessPoint in _accessPoints.Values) accessPoint.Scenario = AccessPointScenario.Healthy;
+            return SnapshotEventDay();
+        }
+    }
+
+    // Called only while holding the state lock; returned records are detached from mutable state.
+    private IReadOnlyList<AccessPointSnapshot> SnapshotAccessPoints() => Array.AsReadOnly(_accessPoints.Values
+        .OrderBy(accessPoint => accessPoint.Baseline.ApId, StringComparer.Ordinal)
+        .Select(accessPoint => accessPoint.ToSnapshot(_heldPosition?.NormalizedLoad ?? 0m))
+        .ToArray());
+
+    private EventDaySnapshot SnapshotEventDay() => new(
+        EventDayScenario.Name, _heldPosition is null ? "baseline" : "held",
+        _heldPosition?.ElapsedMinutes, _heldPosition?.Phase,
+        _heldPosition?.NormalizedLoad ?? 0m, SnapshotAccessPoints());
 
     public bool TrySetScenario(
         string apId,
@@ -36,41 +70,18 @@ public sealed class AccessPointStateStore
             }
 
             accessPoint.Scenario = scenario;
-            snapshot = accessPoint.ToSnapshot();
+            snapshot = accessPoint.ToSnapshot(_heldPosition?.NormalizedLoad ?? 0m);
             return true;
         }
     }
 
-    private sealed class AccessPointState(
-        string apId,
-        string zone,
-        int healthyClients,
-        double healthyChannelUtilizationRatio,
-        double healthyManagementLatencySeconds,
-        double healthyManagementPacketLossRatio)
+    private sealed class AccessPointState(AccessPointBaseline baseline)
     {
-        public string ApId { get; } = apId;
-        public string Zone { get; } = zone;
-        public int HealthyClients { get; } = healthyClients;
-        public double HealthyChannelUtilizationRatio { get; } = healthyChannelUtilizationRatio;
-        public double HealthyManagementLatencySeconds { get; } = healthyManagementLatencySeconds;
-        public double HealthyManagementPacketLossRatio { get; } = healthyManagementPacketLossRatio;
+        public AccessPointBaseline Baseline { get; } = baseline;
         public string Scenario { get; set; } = AccessPointScenario.Healthy;
 
-        public AccessPointSnapshot ToSnapshot()
-        {
-            var operational = Scenario == AccessPointScenario.Healthy;
-
-            return new AccessPointSnapshot(
-                ApId,
-                Zone,
-                Scenario,
-                operational,
-                operational ? HealthyClients : 0,
-                operational ? HealthyChannelUtilizationRatio : null,
-                operational ? HealthyManagementLatencySeconds : null,
-                operational ? HealthyManagementPacketLossRatio : null);
-        }
+        public AccessPointSnapshot ToSnapshot(decimal load) =>
+            EventDayScenario.Measure(Baseline, Scenario == AccessPointScenario.Healthy, load);
     }
 }
 

@@ -144,6 +144,9 @@ public sealed class PrometheusClient(HttpClient httpClient)
         var alertsTask = QueryVectorAsync(
             "ALERTS{alertname=\"VenueApDown\"}",
             cancellationToken);
+        var degradationAlertsTask = QueryVectorAsync(
+            "ALERTS{alertname=\"VenueApDegraded\"}",
+            cancellationToken);
 
         await Task.WhenAll(
             operationalTask,
@@ -157,7 +160,8 @@ public sealed class PrometheusClient(HttpClient httpClient)
             probeSuccessTask,
             probeDurationTask,
             probeStatusTask,
-            alertsTask);
+            alertsTask,
+            degradationAlertsTask);
 
         var operational = IndexAccessPointSamples(
             await operationalTask,
@@ -194,6 +198,8 @@ public sealed class PrometheusClient(HttpClient httpClient)
             "venue_ap_management_packet_loss_ratio");
 
         var alertStates = IndexAlertStates(await alertsTask, operational.Keys);
+        var degradationAlertStates = IndexAlertStates(
+            await degradationAlertsTask, operational.Keys, "VenueApDegraded");
         var accessPoints = operational
             .OrderBy(pair => pair.Key.ApId, StringComparer.Ordinal)
             .Select(pair =>
@@ -256,6 +262,8 @@ public sealed class PrometheusClient(HttpClient httpClient)
                     managementLatencySeconds,
                     managementPacketLossRatio,
                     alertState,
+                    AccessPointDegradation.IsDegraded(isOperational, channelUtilizationRatio, managementLatencySeconds, managementPacketLossRatio),
+                    degradationAlertStates.GetValueOrDefault(key, "inactive"),
                     "simulated",
                     operationalSample.ObservedAtUtc);
             })
@@ -296,6 +304,7 @@ public sealed class PrometheusClient(HttpClient httpClient)
                     pair.Key,
                     pair.Value.Value,
                     clientCount,
+                    accessPoints.Count(ap => ap.Zone == pair.Key && ap.Degraded),
                     "derived",
                     pair.Value.ObservedAtUtc);
             })
@@ -504,7 +513,8 @@ public sealed class PrometheusClient(HttpClient httpClient)
                     clientCount,
                     channelUtilizationRatio,
                     managementLatencySeconds,
-                    managementPacketLossRatio);
+                    managementPacketLossRatio,
+                    AccessPointDegradation.IsDegraded(isOperational, channelUtilizationRatio, managementLatencySeconds, managementPacketLossRatio));
             })
             .ToArray();
 
@@ -809,7 +819,8 @@ public sealed class PrometheusClient(HttpClient httpClient)
 
     private static Dictionary<AccessPointSeriesKey, string> IndexAlertStates(
         IReadOnlyList<PrometheusSample> alerts,
-        IEnumerable<AccessPointSeriesKey> knownAccessPoints)
+        IEnumerable<AccessPointSeriesKey> knownAccessPoints,
+        string alertName = "VenueApDown")
     {
         var known = knownAccessPoints.ToHashSet();
         var states = new Dictionary<AccessPointSeriesKey, string>();
@@ -817,21 +828,21 @@ public sealed class PrometheusClient(HttpClient httpClient)
         foreach (var alert in alerts)
         {
             var key = new AccessPointSeriesKey(
-                ReadRequiredLabel(alert, "ap_id", "VenueApDown alert"),
-                ReadRequiredLabel(alert, "zone", "VenueApDown alert"));
+                ReadRequiredLabel(alert, "ap_id", $"{alertName} alert"),
+                ReadRequiredLabel(alert, "zone", $"{alertName} alert"));
             if (!known.Contains(key))
             {
                 throw new PrometheusQueryException(
-                    $"VenueApDown returned an unknown access point {key.ApId} in {key.Zone}.");
+                    $"{alertName} returned an unknown access point {key.ApId} in {key.Zone}.");
             }
 
             if (alert.Value != 1)
             {
                 throw new PrometheusQueryException(
-                    "Prometheus returned an invalid VenueApDown alert value.");
+                    $"Prometheus returned an invalid {alertName} alert value.");
             }
 
-            var state = ReadRequiredLabel(alert, "alertstate", "VenueApDown alert");
+            var state = ReadRequiredLabel(alert, "alertstate", $"{alertName} alert");
             if (state is not ("pending" or "firing"))
             {
                 throw new PrometheusQueryException(
@@ -841,7 +852,7 @@ public sealed class PrometheusClient(HttpClient httpClient)
             if (!states.TryAdd(key, state))
             {
                 throw new PrometheusQueryException(
-                    $"Prometheus returned duplicate VenueApDown alerts for {key.ApId}.");
+                    $"Prometheus returned duplicate {alertName} alerts for {key.ApId}.");
             }
         }
 
@@ -1162,6 +1173,8 @@ public sealed record OperationsAccessPointObservation(
     double? ManagementLatencySeconds,
     double? ManagementPacketLossRatio,
     string AlertState,
+    bool Degraded,
+    string DegradationAlertState,
     string Source,
     DateTimeOffset ObservedAtUtc);
 
@@ -1169,6 +1182,7 @@ public sealed record OperationsZoneObservation(
     string Zone,
     double OperationalRatio,
     int Clients,
+    int DegradedAccessPoints,
     string Source,
     DateTimeOffset ObservedAtUtc);
 
@@ -1188,4 +1202,5 @@ public sealed record AccessPointHistorySample(
     int Clients,
     double? ChannelUtilizationRatio,
     double? ManagementLatencySeconds,
-    double? ManagementPacketLossRatio);
+    double? ManagementPacketLossRatio,
+    bool Degraded);

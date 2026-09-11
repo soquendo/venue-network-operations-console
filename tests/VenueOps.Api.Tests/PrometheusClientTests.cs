@@ -27,6 +27,7 @@ public sealed class PrometheusClientTests
             "probe_success{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("1"),
             "probe_duration_seconds{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("0.012"),
             "probe_http_status_code{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("200"),
+            "ALERTS{alertname=\"VenueApDegraded\"}" => EmptyVector(),
             "ALERTS{alertname=\"VenueApDown\"}" => EmptyVector(),
             _ => throw new InvalidOperationException($"Unexpected query: {expression}")
         });
@@ -72,6 +73,7 @@ public sealed class PrometheusClientTests
             "probe_success{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("1"),
             "probe_duration_seconds{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("0.012"),
             "probe_http_status_code{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("200"),
+            "ALERTS{alertname=\"VenueApDegraded\"}" => EmptyVector(),
             "ALERTS{alertname=\"VenueApDown\"}" => Vector(
                 "1",
                 ("alertname", "VenueApDown"),
@@ -114,6 +116,7 @@ public sealed class PrometheusClientTests
             "probe_success{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("1"),
             "probe_duration_seconds{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("0.012"),
             "probe_http_status_code{job=\"blackbox-http\",instance=\"http://venue-api:8080/health/live\"}" => Vector("200"),
+            "ALERTS{alertname=\"VenueApDegraded\"}" => EmptyVector(),
             "ALERTS{alertname=\"VenueApDown\"}" => EmptyVector(),
             _ => EmptyVector()
         });

@@ -2,47 +2,56 @@ using Prometheus;
 
 namespace VenueOps.TelemetrySimulator;
 
-public sealed class AccessPointMetricsPublisher
+public sealed class AccessPointMetricsPublisher(CollectorRegistry registry)
 {
-    private static readonly Gauge Operational = Metrics.CreateGauge(
+    private readonly SemaphoreSlim _exportGuard = new(1, 1);
+    private readonly Gauge Operational = Metrics.WithCustomRegistry(registry).CreateGauge(
         "venue_ap_operational",
         "Whether the simulated wireless access point is operational (1) or offline (0).",
         "ap_id",
         "zone");
 
-    private static readonly Gauge Clients = Metrics.CreateGauge(
+    private readonly Gauge Clients = Metrics.WithCustomRegistry(registry).CreateGauge(
         "venue_ap_clients",
         "Current simulated associated-client count.",
         "ap_id",
         "zone");
 
-    private static readonly Gauge ChannelUtilization = Metrics.CreateGauge(
+    private readonly Gauge ChannelUtilization = Metrics.WithCustomRegistry(registry).CreateGauge(
         "venue_ap_channel_utilization_ratio",
         "Simulated wireless channel utilization ratio from 0 to 1.",
         "ap_id",
         "zone");
 
-    private static readonly Gauge ManagementLatency = Metrics.CreateGauge(
+    private readonly Gauge ManagementLatency = Metrics.WithCustomRegistry(registry).CreateGauge(
         "venue_ap_management_latency_seconds",
         "Simulated management-plane round-trip latency in seconds.",
         "ap_id",
         "zone");
 
-    private static readonly Gauge ManagementPacketLoss = Metrics.CreateGauge(
+    private readonly Gauge ManagementPacketLoss = Metrics.WithCustomRegistry(registry).CreateGauge(
         "venue_ap_management_packet_loss_ratio",
         "Simulated management-plane packet loss ratio from 0 to 1.",
         "ap_id",
         "zone");
 
-    public void Publish(IEnumerable<AccessPointSnapshot> accessPoints)
+    public async Task ExportAsync(
+        Func<IReadOnlyList<AccessPointSnapshot>> capture,
+        Func<Task> export,
+        CancellationToken cancellationToken)
     {
-        foreach (var accessPoint in accessPoints)
+        await _exportGuard.WaitAsync(cancellationToken);
+        try
         {
-            Publish(accessPoint);
+            // Capture after acquiring ownership; retain it through the entire export.
+            var snapshot = capture();
+            foreach (var accessPoint in snapshot) Publish(accessPoint);
+            await export();
         }
+        finally { _exportGuard.Release(); }
     }
 
-    public void Publish(AccessPointSnapshot accessPoint)
+    private void Publish(AccessPointSnapshot accessPoint)
     {
         var labels = new[] { accessPoint.ApId, accessPoint.Zone };
 

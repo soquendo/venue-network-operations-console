@@ -315,7 +315,7 @@ describe('AccessPointHistoryPanel', () => {
     const rows = view.container.querySelectorAll('tbody tr')
     expect(rows[0].textContent).toContain('Offline')
     expect(rows[0].querySelectorAll('td')[2].textContent).toBe('Not observed')
-    expect(rows[1].textContent).toContain('Operational')
+    expect(rows[1].textContent).toContain('Healthy')
     expect(rows[1].querySelectorAll('td')[2].textContent).toBe('0.0%')
   })
 })
@@ -370,6 +370,57 @@ function summaryValue(container: HTMLElement, label: string) {
     .find((element) => element.querySelector('span')?.textContent === label)
   return item?.querySelector('strong')?.textContent
 }
+
+describe('held event history quality', () => {
+  it('renders degraded cells and recovery without counting quality as operational transitions', async () => {
+    const history = timelineHistory([[0, true], [5, true], [10, true]])
+    Object.assign(history.samples[1], { degraded: true, clients: 84, channelUtilizationRatio: 0.95, managementLatencySeconds: 0.078, managementPacketLossRatio: 0.017 })
+    const { container } = await showHistory(history)
+    const cells = timelineCells(container)
+    expect(cells.map(cell => cell.className)).toEqual(['timeline-up', 'timeline-degraded', 'timeline-up'])
+    expect(cells[1].title).toContain('Degraded')
+    expect(container.querySelector('.timeline-legend')?.textContent).toContain('Degraded')
+    expect([...container.querySelectorAll('tbody tr')].map(row => row.querySelector('td')?.textContent)).toEqual(['Healthy', 'Degraded', 'Healthy'])
+    expect(summaryValue(container, 'State changes')).toBe('0')
+    expect(summaryValue(container, 'Offline samples')).toBe('0')
+  })
+
+  it('keeps availability counting and sparse geometry with degraded samples', async () => {
+    const history = timelineHistory([[0, true], [5, false], [10, true], [25, true]])
+    Object.assign(history.samples[2], { degraded: true })
+    const { container } = await showHistory(history)
+    const cells = timelineCells(container)
+    expectCell(cells[2], 0.833333333333, 0.555555555556)
+    expectCell(cells[3], 2.5, 0.555555555556)
+    expectGaps(container, false, true, true)
+    expect(summaryValue(container, 'State changes')).toBe('2')
+    expect(summaryValue(container, 'Offline samples')).toBe('1')
+  })
+
+  it('gives an offline history observation precedence over a degraded flag', async () => {
+    const history = timelineHistory([[0, false]])
+    Object.assign(history.samples[0], { degraded: true })
+    const { container } = await showHistory(history)
+    expect(timelineCells(container)[0].className).toBe('timeline-down')
+    expect(container.querySelector('tbody tr')?.textContent).toContain('Offline')
+    expect(container.querySelector('tbody tr')?.textContent).toContain('Not observed')
+  })
+
+  it('replaces retained degraded history after a successful same-selection recovery', async () => {
+    const peak = timelineHistory([[0, true]])
+    Object.assign(peak.samples[0], { degraded: true })
+    const { container, fetch } = await showHistory(peak)
+    await advanceTime(5_000)
+    await fetch.history()[1].reject(new Error('history unavailable'))
+    expect(container.querySelector('.timeline-degraded')).not.toBeNull()
+    expect(container.textContent).toContain('history unavailable')
+    await advanceTime(5_000)
+    await fetch.history()[2].json(timelineHistory([[0, true]]))
+    expect(container.querySelector('.timeline-degraded')).toBeNull()
+    expect(container.querySelector('tbody td')?.textContent).toBe('Healthy')
+    expect(container.textContent).not.toContain('history unavailable')
+  })
+})
 
 describe('history coverage and summaries', () => {
   // Expected percentages are fixture-specific constants, not calculated by a geometry helper.
@@ -446,7 +497,7 @@ describe('history coverage and summaries', () => {
     expect(summaryValue(container, 'Latest clients')).toBe('0')
     expect(summaryValue(container, 'Offline samples')).toBe('0')
     expect([...container.querySelectorAll('tbody td')].map((cell) => cell.textContent)).toEqual([
-      'Operational', '0', '0.0%', '0.0 ms', '0.0%',
+      'Healthy', '0', '0.0%', '0.0 ms', '0.0%',
     ])
   })
 
@@ -560,11 +611,11 @@ describe('history coverage and summaries', () => {
     const descriptionId = timeline.getAttribute('aria-describedby')
     expect(descriptionId).toBeTruthy()
     expect(document.getElementById(descriptionId!)?.textContent).toBe(
-      'Cell width represents query resolution, not measured state duration. Empty areas were not observed. State changes compare adjacent samples.',
+      'Cell width represents query resolution, not measured state duration. Empty areas were not observed. State changes compare adjacent samples. Quality changes do not count as operational state changes.',
     )
     expect(container.querySelector('.timeline-legend')?.textContent).toContain('Not observed')
     expect(timelineCells(container)[0].title).toContain('Offline')
-    expect(timelineCells(container)[1].title).toContain('Operational')
+    expect(timelineCells(container)[1].title).toContain('Healthy')
   })
 
   it('retains the original response geometry and bounds through a failed same-selection refresh', async () => {

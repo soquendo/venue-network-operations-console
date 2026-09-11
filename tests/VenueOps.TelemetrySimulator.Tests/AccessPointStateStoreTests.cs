@@ -6,6 +6,20 @@ namespace VenueOps.TelemetrySimulator.Tests;
 public sealed class AccessPointStateStoreTests
 {
     [Fact]
+    public void HealthyRestoreUsesExactBaselineAndSnapshotsAreDetached()
+    {
+        var store = new AccessPointStateStore();
+        var original = store.GetAll().ToArray();
+        store.TrySetScenario("AP-001", AccessPointScenario.Offline, out _);
+        Assert.True(original[0].Operational);
+        store.TrySetScenario("ap-001", AccessPointScenario.Healthy, out _);
+        Assert.Equal(original, store.GetAll());
+        Assert.Equal(new[] { 0.55, 0.48, 0.41, 0.46 }, store.GetAll().Select(ap => ap.ChannelUtilizationRatio!.Value));
+        Assert.Equal(new[] { 0.018, 0.016, 0.015, 0.017 }, store.GetAll().Select(ap => ap.ManagementLatencySeconds!.Value));
+        Assert.Equal(new[] { 0.002, 0.001, 0.001, 0.002 }, store.GetAll().Select(ap => ap.ManagementPacketLossRatio!.Value));
+    }
+
+    [Fact]
     public void InitialStateContainsFourHealthyAccessPointsAcrossTwoZones()
     {
         var store = new AccessPointStateStore();

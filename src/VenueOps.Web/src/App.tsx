@@ -127,7 +127,7 @@ function App() {
                 <article className="zone-card" key={zone.zone}>
                   <div className="zone-card-heading">
                     <h3>{formatName(zone.zone)}</h3>
-                    <StatusBadge healthy={zone.operationalRatio === 1} />
+                    <StatusBadge operational={zone.operationalRatio === 1} degraded={zone.degradedAccessPoints > 0} />
                   </div>
                   <dl>
                     <div>
@@ -137,6 +137,10 @@ function App() {
                     <div>
                       <dt>Associated clients</dt>
                       <dd>{zone.clients}</dd>
+                    </div>
+                    <div>
+                      <dt>Degraded APs</dt>
+                      <dd>{zone.degradedAccessPoints}</dd>
                     </div>
                   </dl>
                 </article>
@@ -182,7 +186,8 @@ function App() {
 
           <footer className="provenance-note">
             <strong>Source key:</strong> AP and RF values are simulated; zone
-            summaries are derived by Prometheus; scrape and HTTP probe results
+            client/availability summaries are derived by Prometheus; quality is
+            derived by the API; scrape and HTTP probe results
             are measured locally.
           </footer>
         </>
@@ -222,25 +227,35 @@ function AccessPointRow({
       <th scope="row">{accessPoint.apId}</th>
       <td>{formatName(accessPoint.zone)}</td>
       <td>
-        <StatusBadge healthy={accessPoint.operational} />
+        <StatusBadge operational={accessPoint.operational} degraded={accessPoint.degraded} />
       </td>
       <td>{accessPoint.clients}</td>
       <td>{formatOptionalRatio(accessPoint.channelUtilizationRatio)}</td>
       <td>{formatOptionalMilliseconds(accessPoint.managementLatencySeconds)}</td>
       <td>{formatOptionalRatio(accessPoint.managementPacketLossRatio)}</td>
       <td>
-        <span className={`alert-state alert-${accessPoint.alertState}`}>
-          {accessPoint.alertState}
-        </span>
+        <div className="alert-item">
+          <span className="alert-label">AP down</span>
+          <span className={`alert-state alert-${accessPoint.alertState}`}>
+            {accessPoint.alertState}
+          </span>
+        </div>
+        <div className="alert-item">
+          <span className="alert-label">Degradation</span>
+          <span className={`alert-state alert-degradation alert-${accessPoint.degradationAlertState}`}>
+            {accessPoint.degradationAlertState}
+          </span>
+        </div>
       </td>
     </tr>
   )
 }
 
-function StatusBadge({ healthy }: { healthy: boolean }) {
+function StatusBadge({ operational, degraded }: { operational: boolean; degraded: boolean }) {
+  const status = !operational ? 'offline' : degraded ? 'degraded' : 'healthy'
   return (
-    <span className={`status-badge ${healthy ? 'status-healthy' : 'status-offline'}`}>
-      {healthy ? 'Operational' : 'Offline'}
+    <span className={`status-badge status-${status}`}>
+      {!operational ? 'Offline' : degraded ? 'Degraded' : 'Healthy'}
     </span>
   )
 }

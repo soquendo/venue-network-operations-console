@@ -211,9 +211,21 @@
   background: var(--danger-bg);
 }
 
-.alert-pending {
+.alert-pending,
+.status-degraded,
+.alert-degradation.alert-firing {
   color: var(--warning-text);
   background: var(--warning-bg);
+}
+
+.alert-item + .alert-item {
+  margin-top: 6px;
+}
+
+.alert-label {
+  margin-right: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
 .table-scroll {
@@ -363,6 +375,11 @@ tbody tr:last-child td {
 .timeline-down,
 .legend-down {
   background: #c34b4b;
+}
+
+.timeline-degraded,
+.legend-degraded {
+  background: var(--warning-text);
 }
 
 .timeline-legend {

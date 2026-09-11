@@ -10,6 +10,8 @@ export interface AccessPointObservation {
   managementLatencySeconds: number | null
   managementPacketLossRatio: number | null
   alertState: AlertState
+  degraded: boolean
+  degradationAlertState: AlertState
   source: TelemetrySource
   observedAtUtc: string
 }
@@ -18,6 +20,7 @@ export interface ZoneObservation {
   zone: string
   operationalRatio: number
   clients: number
+  degradedAccessPoints: number
   source: TelemetrySource
   observedAtUtc: string
 }
@@ -51,6 +54,7 @@ export type HistoryWindow = '15m' | '1h' | '6h' | '24h'
 export interface AccessPointHistorySample {
   observedAtUtc: string
   operational: boolean
+  degraded: boolean
   clients: number
   channelUtilizationRatio: number | null
   managementLatencySeconds: number | null

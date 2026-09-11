@@ -190,20 +190,22 @@ export function AccessPointHistoryPanel({
             >
               {timeline.cells.map(({ sample, left, width }) => (
                 <span
-                  className={sample.operational ? 'timeline-up' : 'timeline-down'}
+                  className={!sample.operational ? 'timeline-down' : sample.degraded ? 'timeline-degraded' : 'timeline-up'}
                   style={{ left: `${left}%`, width: `${width}%` }}
-                  title={`${formatDateTime(sample.observedAtUtc)} — ${sample.operational ? 'Operational' : 'Offline'}`}
+                  title={`${formatDateTime(sample.observedAtUtc)} — ${historyStatus(sample)}`}
                   key={sample.observedAtUtc}
                 />
               ))}
             </div>
             <div className="timeline-legend" aria-hidden="true">
-              <span><i className="legend-up" /> Operational</span>
+              <span><i className="legend-up" /> Healthy</span>
+              <span><i className="legend-degraded" /> Degraded</span>
               <span><i className="legend-down" /> Offline</span>
               <span><i className="legend-unobserved" /> Not observed</span>
             </div>
             <p className="timeline-explanation" id="history-timeline-explanation">
               Cell width represents query resolution, not measured state duration. Empty areas were not observed. State changes compare adjacent samples.
+              {' '}Quality changes do not count as operational state changes.
             </p>
           </div>
 
@@ -251,13 +253,17 @@ function HistoryRow({ sample }: { sample: AccessPointHistorySample }) {
   return (
     <tr className={sample.operational ? undefined : 'offline-row'}>
       <th scope="row">{formatTime(sample.observedAtUtc)}</th>
-      <td>{sample.operational ? 'Operational' : 'Offline'}</td>
+      <td>{historyStatus(sample)}</td>
       <td>{sample.clients}</td>
       <td>{formatOptionalRatio(sample.channelUtilizationRatio)}</td>
       <td>{formatOptionalMilliseconds(sample.managementLatencySeconds)}</td>
       <td>{formatOptionalRatio(sample.managementPacketLossRatio)}</td>
     </tr>
   )
+}
+
+function historyStatus(sample: AccessPointHistorySample) {
+  return !sample.operational ? 'Offline' : sample.degraded ? 'Degraded' : 'Healthy'
 }
 
 function summarizeHistory(history: AccessPointHistory | null) {

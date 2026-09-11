@@ -1,0 +1,371 @@
+# Boundary case names match AccessPointDegradationTests.ClassifiesValidatedMeasurements.
+rule_files:
+  - ../../infrastructure/prometheus/rules/venue.rules.yml
+evaluation_interval: 5s
+tests:
+  - name: shared policy boundaries and offline precedence
+    interval: 5s
+    input_series:
+      - series: 'venue_ap_operational{ap_id="case-offline",zone="zone-a"}'
+        values: '0x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-offline",zone="zone-a"}'
+        values: '0.95x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-offline",zone="zone-a"}'
+        values: '0.078x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-offline",zone="zone-a"}'
+        values: '0.017x8'
+      - series: 'venue_ap_operational{ap_id="case-below-utilization",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-below-utilization",zone="zone-a"}'
+        values: '0.799x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-below-utilization",zone="zone-a"}'
+        values: '0.060x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-below-utilization",zone="zone-a"}'
+        values: '0.020x8'
+      - series: 'venue_ap_operational{ap_id="case-at-utilization-only",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-at-utilization-only",zone="zone-a"}'
+        values: '0.80x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-at-utilization-only",zone="zone-a"}'
+        values: '0.049x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-at-utilization-only",zone="zone-a"}'
+        values: '0.009x8'
+      - series: 'venue_ap_operational{ap_id="case-at-latency",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-at-latency",zone="zone-a"}'
+        values: '0.80x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-at-latency",zone="zone-a"}'
+        values: '0.050x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-at-latency",zone="zone-a"}'
+        values: '0.009x8'
+      - series: 'venue_ap_operational{ap_id="case-at-loss",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-at-loss",zone="zone-a"}'
+        values: '0.80x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-at-loss",zone="zone-a"}'
+        values: '0.049x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-at-loss",zone="zone-a"}'
+        values: '0.010x8'
+      - series: 'venue_ap_operational{ap_id="case-above-latency",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-above-latency",zone="zone-a"}'
+        values: '0.81x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-above-latency",zone="zone-a"}'
+        values: '0.051x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-above-latency",zone="zone-a"}'
+        values: '0.001x8'
+      - series: 'venue_ap_operational{ap_id="case-above-loss",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-above-loss",zone="zone-a"}'
+        values: '0.81x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-above-loss",zone="zone-a"}'
+        values: '0.010x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-above-loss",zone="zone-a"}'
+        values: '0.011x8'
+      - series: 'venue_ap_operational{ap_id="case-high-utilization-only",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-high-utilization-only",zone="zone-a"}'
+        values: '0.95x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-high-utilization-only",zone="zone-a"}'
+        values: '0.049x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-high-utilization-only",zone="zone-a"}'
+        values: '0.009x8'
+      - series: 'venue_ap_operational{ap_id="case-peak-ap-001",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-peak-ap-001",zone="zone-a"}'
+        values: '0.95x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-peak-ap-001",zone="zone-a"}'
+        values: '0.078x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-peak-ap-001",zone="zone-a"}'
+        values: '0.017x8'
+      - series: 'venue_ap_operational{ap_id="case-peak-ap-002",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-peak-ap-002",zone="zone-a"}'
+        values: '0.88x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-peak-ap-002",zone="zone-a"}'
+        values: '0.062x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-peak-ap-002",zone="zone-a"}'
+        values: '0.009x8'
+      - series: 'venue_ap_operational{ap_id="case-peak-ap-003",zone="zone-b"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-peak-ap-003",zone="zone-b"}'
+        values: '0.61x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-peak-ap-003",zone="zone-b"}'
+        values: '0.015x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-peak-ap-003",zone="zone-b"}'
+        values: '0.001x8'
+      - series: 'venue_ap_operational{ap_id="case-peak-ap-004",zone="zone-b"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-peak-ap-004",zone="zone-b"}'
+        values: '0.66x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-peak-ap-004",zone="zone-b"}'
+        values: '0.019x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-peak-ap-004",zone="zone-b"}'
+        values: '0.002x8'
+      - series: 'venue_ap_operational{ap_id="case-recovery-ap-001",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-recovery-ap-001",zone="zone-a"}'
+        values: '0.75x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-recovery-ap-001",zone="zone-a"}'
+        values: '0.038x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-recovery-ap-001",zone="zone-a"}'
+        values: '0.002x8'
+      - series: 'venue_ap_operational{ap_id="case-recovery-ap-002",zone="zone-a"}'
+        values: '1x8'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="case-recovery-ap-002",zone="zone-a"}'
+        values: '0.68x8'
+      - series: 'venue_ap_management_latency_seconds{ap_id="case-recovery-ap-002",zone="zone-a"}'
+        values: '0.022x8'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="case-recovery-ap-002",zone="zone-a"}'
+        values: '0.001x8'
+    alert_rule_test:
+      - eval_time: 0s
+        alertname: VenueApDegraded
+        exp_alerts: []
+      - eval_time: 25s
+        alertname: VenueApDegraded
+        exp_alerts: []
+      - eval_time: 30s
+        alertname: VenueApDegraded
+        exp_alerts:
+          - exp_labels:
+              ap_id: case-at-latency
+              zone: zone-a
+              severity: warning
+              telemetry_source: simulated
+            exp_annotations:
+              summary: "Simulated access point case-at-latency is degraded"
+              description: "The simulated controller has reported degraded management performance for case-at-latency in zone-a for at least 30 seconds."
+          - exp_labels:
+              ap_id: case-at-loss
+              zone: zone-a
+              severity: warning
+              telemetry_source: simulated
+            exp_annotations:
+              summary: "Simulated access point case-at-loss is degraded"
+              description: "The simulated controller has reported degraded management performance for case-at-loss in zone-a for at least 30 seconds."
+          - exp_labels:
+              ap_id: case-above-latency
+              zone: zone-a
+              severity: warning
+              telemetry_source: simulated
+            exp_annotations:
+              summary: "Simulated access point case-above-latency is degraded"
+              description: "The simulated controller has reported degraded management performance for case-above-latency in zone-a for at least 30 seconds."
+          - exp_labels:
+              ap_id: case-above-loss
+              zone: zone-a
+              severity: warning
+              telemetry_source: simulated
+            exp_annotations:
+              summary: "Simulated access point case-above-loss is degraded"
+              description: "The simulated controller has reported degraded management performance for case-above-loss in zone-a for at least 30 seconds."
+          - exp_labels:
+              ap_id: case-peak-ap-001
+              zone: zone-a
+              severity: warning
+              telemetry_source: simulated
+            exp_annotations:
+              summary: "Simulated access point case-peak-ap-001 is degraded"
+              description: "The simulated controller has reported degraded management performance for case-peak-ap-001 in zone-a for at least 30 seconds."
+          - exp_labels:
+              ap_id: case-peak-ap-002
+              zone: zone-a
+              severity: warning
+              telemetry_source: simulated
+            exp_annotations:
+              summary: "Simulated access point case-peak-ap-002 is degraded"
+              description: "The simulated controller has reported degraded management performance for case-peak-ap-002 in zone-a for at least 30 seconds."
+      - eval_time: 10s
+        alertname: VenueApDown
+        exp_alerts:
+          - exp_labels:
+              ap_id: case-offline
+              zone: zone-a
+              severity: critical
+              telemetry_source: simulated
+            exp_annotations:
+              summary: "Simulated access point case-offline is offline"
+              description: "The simulated controller has reported case-offline in zone-a offline for at least 10 seconds."
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 0s
+        exp_samples:
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-at-latency",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-at-loss",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-above-latency",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-above-loss",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-peak-ap-001",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-peak-ap-002",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 25s
+        exp_samples:
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-at-latency",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-at-loss",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-above-latency",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-above-loss",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-peak-ap-001",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="case-peak-ap-002",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 30s
+        exp_samples: []
+  - name: collected baseline building peak and recovery profile
+    interval: 5s
+    input_series:
+      - series: 'venue_ap_operational{ap_id="ap-001",zone="zone-a"}'
+        values: '1x2 1x2 1x8 1x2'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="ap-001",zone="zone-a"}'
+        values: '0.55x2 0.75x2 0.95x8 0.75x2'
+      - series: 'venue_ap_management_latency_seconds{ap_id="ap-001",zone="zone-a"}'
+        values: '0.018x2 0.038x2 0.078x8 0.038x2'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="ap-001",zone="zone-a"}'
+        values: '0.002x2 0.002x2 0.017x8 0.002x2'
+      - series: 'venue_ap_operational{ap_id="ap-002",zone="zone-a"}'
+        values: '1x2 1x2 1x8 1x2'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="ap-002",zone="zone-a"}'
+        values: '0.48x2 0.68x2 0.88x8 0.68x2'
+      - series: 'venue_ap_management_latency_seconds{ap_id="ap-002",zone="zone-a"}'
+        values: '0.016x2 0.022x2 0.062x8 0.022x2'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="ap-002",zone="zone-a"}'
+        values: '0.001x2 0.001x2 0.009x8 0.001x2'
+      - series: 'venue_ap_operational{ap_id="ap-003",zone="zone-b"}'
+        values: '1x2 1x2 1x8 1x2'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="ap-003",zone="zone-b"}'
+        values: '0.41x2 0.51x2 0.61x8 0.51x2'
+      - series: 'venue_ap_management_latency_seconds{ap_id="ap-003",zone="zone-b"}'
+        values: '0.015x2 0.015x2 0.015x8 0.015x2'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="ap-003",zone="zone-b"}'
+        values: '0.001x2 0.001x2 0.001x8 0.001x2'
+      - series: 'venue_ap_operational{ap_id="ap-004",zone="zone-b"}'
+        values: '1x2 1x2 1x8 1x2'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="ap-004",zone="zone-b"}'
+        values: '0.46x2 0.56x2 0.66x8 0.56x2'
+      - series: 'venue_ap_management_latency_seconds{ap_id="ap-004",zone="zone-b"}'
+        values: '0.017x2 0.017x2 0.019x8 0.017x2'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="ap-004",zone="zone-b"}'
+        values: '0.002x2 0.002x2 0.002x8 0.002x2'
+    alert_rule_test:
+      - eval_time: 0s
+        alertname: VenueApDegraded
+        exp_alerts: []
+      - eval_time: 25s
+        alertname: VenueApDegraded
+        exp_alerts: []
+      - eval_time: 30s
+        alertname: VenueApDegraded
+        exp_alerts: []
+      - eval_time: 55s
+        alertname: VenueApDegraded
+        exp_alerts: []
+      - eval_time: 60s
+        alertname: VenueApDegraded
+        exp_alerts:
+          - exp_labels:
+              ap_id: ap-001
+              zone: zone-a
+              severity: warning
+              telemetry_source: simulated
+            exp_annotations:
+              summary: "Simulated access point ap-001 is degraded"
+              description: "The simulated controller has reported degraded management performance for ap-001 in zone-a for at least 30 seconds."
+          - exp_labels:
+              ap_id: ap-002
+              zone: zone-a
+              severity: warning
+              telemetry_source: simulated
+            exp_annotations:
+              summary: "Simulated access point ap-002 is degraded"
+              description: "The simulated controller has reported degraded management performance for ap-002 in zone-a for at least 30 seconds."
+      - eval_time: 75s
+        alertname: VenueApDegraded
+        exp_alerts: []
+      - eval_time: 60s
+        alertname: VenueApDown
+        exp_alerts: []
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 0s
+        exp_samples: []
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 25s
+        exp_samples: []
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 30s
+        exp_samples:
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="ap-001",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="ap-002",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 55s
+        exp_samples:
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="ap-001",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="ap-002",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 75s
+        exp_samples: []
+  - name: interruption restarts the full persistence duration
+    interval: 5s
+    input_series:
+      - series: 'venue_ap_operational{ap_id="ap-001",zone="zone-a"}'
+        values: '1x4 1 1x7'
+      - series: 'venue_ap_channel_utilization_ratio{ap_id="ap-001",zone="zone-a"}'
+        values: '0.95x4 0.55 0.95x7'
+      - series: 'venue_ap_management_latency_seconds{ap_id="ap-001",zone="zone-a"}'
+        values: '0.078x4 0.018 0.078x7'
+      - series: 'venue_ap_management_packet_loss_ratio{ap_id="ap-001",zone="zone-a"}'
+        values: '0.017x4 0.002 0.017x7'
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: VenueApDegraded
+        exp_alerts: []
+      - eval_time: 25s
+        alertname: VenueApDegraded
+        exp_alerts: []
+      - eval_time: 55s
+        alertname: VenueApDegraded
+        exp_alerts: []
+      - eval_time: 60s
+        alertname: VenueApDegraded
+        exp_alerts:
+          - exp_labels:
+              ap_id: ap-001
+              zone: zone-a
+              severity: warning
+              telemetry_source: simulated
+            exp_annotations:
+              summary: "Simulated access point ap-001 is degraded"
+              description: "The simulated controller has reported degraded management performance for ap-001 in zone-a for at least 30 seconds."
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 20s
+        exp_samples:
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="ap-001",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 25s
+        exp_samples: []
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 30s
+        exp_samples:
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="ap-001",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
+      - expr: 'ALERTS{alertname="VenueApDegraded",alertstate="pending"}'
+        eval_time: 55s
+        exp_samples:
+          - labels: 'ALERTS{alertname="VenueApDegraded",alertstate="pending",ap_id="ap-001",zone="zone-a",severity="warning",telemetry_source="simulated"}'
+            value: 1
