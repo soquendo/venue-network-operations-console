@@ -103,6 +103,7 @@ export function AccessPointHistoryPanel({
   }, [selection])
 
   const summary = useMemo(() => summarizeHistory(history), [history])
+  const timeline = useMemo(() => buildTimeline(history), [history])
   const recentSamples = history?.samples.slice(-12).reverse() ?? []
 
   return (
@@ -161,7 +162,7 @@ export function AccessPointHistoryPanel({
         </p>
       ) : null}
 
-      {history && summary ? (
+      {history && summary && timeline ? (
         <div className="history-panel" aria-busy={isLoading}>
           <div className="history-summary" aria-label="History summary">
             <SummaryItem label="Samples" value={String(history.samples.length)} />
@@ -183,11 +184,14 @@ export function AccessPointHistoryPanel({
             </div>
             <div
               className="state-timeline"
-              aria-label={`${summary.offlineSamples} of ${history.samples.length} samples were offline`}
+              role="img"
+              aria-label={`Requested window: ${history.startUtc} to ${history.endUtc}. ${history.stepSeconds}s resolution. ${summary.offlineSamples} of ${history.samples.length} samples were offline. Leading gap: ${timeline.hasLeadingGap ? 'yes' : 'no'}. Internal gaps: ${timeline.hasInternalGaps ? 'yes' : 'no'}. Trailing gap: ${timeline.hasTrailingGap ? 'yes' : 'no'}.`}
+              aria-describedby="history-timeline-explanation"
             >
-              {history.samples.map((sample) => (
+              {timeline.cells.map(({ sample, left, width }) => (
                 <span
                   className={sample.operational ? 'timeline-up' : 'timeline-down'}
+                  style={{ left: `${left}%`, width: `${width}%` }}
                   title={`${formatDateTime(sample.observedAtUtc)} — ${sample.operational ? 'Operational' : 'Offline'}`}
                   key={sample.observedAtUtc}
                 />
@@ -196,7 +200,11 @@ export function AccessPointHistoryPanel({
             <div className="timeline-legend" aria-hidden="true">
               <span><i className="legend-up" /> Operational</span>
               <span><i className="legend-down" /> Offline</span>
+              <span><i className="legend-unobserved" /> Not observed</span>
             </div>
+            <p className="timeline-explanation" id="history-timeline-explanation">
+              Cell width represents query resolution, not measured state duration. Empty areas were not observed. State changes compare adjacent samples.
+            </p>
           </div>
 
           <div className="recent-history">
@@ -259,7 +267,8 @@ function summarizeHistory(history: AccessPointHistory | null) {
 
   let stateChanges = 0
   for (let index = 1; index < history.samples.length; index += 1) {
-    if (history.samples[index].operational !== history.samples[index - 1].operational) {
+    if (areAdjacent(history.samples[index - 1], history.samples[index], history.stepSeconds)
+      && history.samples[index].operational !== history.samples[index - 1].operational) {
       stateChanges += 1
     }
   }
@@ -268,6 +277,65 @@ function summarizeHistory(history: AccessPointHistory | null) {
     stateChanges,
     offlineSamples: history.samples.filter((sample) => !sample.operational).length,
     latestClients: history.samples.at(-1)?.clients ?? 0,
+  }
+}
+
+function areAdjacent(
+  previous: AccessPointHistorySample,
+  current: AccessPointHistorySample,
+  stepSeconds: number,
+) {
+  const elapsed = Date.parse(current.observedAtUtc) - Date.parse(previous.observedAtUtc)
+  // The API rounds timestamps to milliseconds; this is only a precision allowance.
+  return typeof previous.operational === 'boolean'
+    && typeof current.operational === 'boolean'
+    && elapsed > 0
+    && Math.abs(elapsed - stepSeconds * 1000) <= 1
+}
+
+function buildTimeline(history: AccessPointHistory | null) {
+  if (!history || history.samples.length === 0) return null
+
+  const start = Date.parse(history.startUtc)
+  const end = Date.parse(history.endUtc)
+  const duration = end - start
+  const halfStep = history.stepSeconds * 1000 / 2
+  const cells = history.samples.map((sample) => {
+    const timestamp = Date.parse(sample.observedAtUtc)
+    return { sample, timestamp, start: timestamp - halfStep, end: timestamp + halfStep }
+  })
+
+  let hasInternalGaps = false
+  for (let index = 1; index < cells.length; index += 1) {
+    const previous = cells[index - 1]
+    const current = cells[index]
+    if (areAdjacent(previous.sample, current.sample, history.stepSeconds)) {
+      const midpoint = (previous.timestamp + current.timestamp) / 2
+      previous.end = midpoint
+      current.start = midpoint
+    } else {
+      hasInternalGaps = true
+      // Keep gap-facing edges separate, including intervals just shorter than a step.
+      const gapStart = Math.min(previous.end, current.start)
+      const gapEnd = Math.max(previous.end, current.start)
+      previous.end = gapStart
+      current.start = gapEnd
+    }
+  }
+
+  return {
+    hasLeadingGap: cells[0].start > start,
+    hasInternalGaps,
+    hasTrailingGap: cells[cells.length - 1].end < end,
+    cells: cells.map((cell) => {
+      const cellStart = Math.max(start, Math.min(end, cell.start))
+      const cellEnd = Math.max(start, Math.min(end, cell.end))
+      return {
+        sample: cell.sample,
+        left: (cellStart - start) / duration * 100,
+        width: Math.max(0, cellEnd - cellStart) / duration * 100,
+      }
+    }),
   }
 }
 

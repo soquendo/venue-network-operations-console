@@ -319,3 +319,282 @@ describe('AccessPointHistoryPanel', () => {
     expect(rows[1].querySelectorAll('td')[2].textContent).toBe('0.0%')
   })
 })
+
+function timelineHistory(
+  points: ReadonlyArray<readonly [secondsFromStart: number, operational: boolean]>,
+  window: HistoryWindow = '15m',
+) {
+  const history = makeHistory('ap-001', window)
+  const baseSample = history.samples[0]
+  history.samples = points.map(([seconds, operational]) => ({
+    ...baseSample,
+    observedAtUtc: new Date(Date.parse(history.startUtc) + seconds * 1000).toISOString(),
+    operational,
+    clients: operational ? 42 : 0,
+    channelUtilizationRatio: operational ? 0.55 : null,
+    managementLatencySeconds: operational ? 0.018 : null,
+    managementPacketLossRatio: operational ? 0.002 : null,
+  }))
+  return history
+}
+
+async function showHistory(history: AccessPointHistory) {
+  const fetch = controlFetch()
+  const view = await render(<AccessPointHistoryPanel accessPoints={makeAccessPoints()} />)
+  await selectValue(view.container, 'Time window', history.window)
+  await advanceTime(0)
+  await fetch.history()[0].json(history)
+  return { ...view, fetch }
+}
+
+function timelineCells(container: HTMLElement) {
+  return [...container.querySelectorAll<HTMLElement>('.state-timeline > span')]
+}
+
+function expectCell(cell: HTMLElement, left: number, width: number) {
+  expect(cell.style.left).toMatch(/%$/)
+  expect(cell.style.width).toMatch(/%$/)
+  expect(Number.parseFloat(cell.style.left)).toBeCloseTo(left, 8)
+  expect(Number.parseFloat(cell.style.width)).toBeCloseTo(width, 8)
+}
+
+function expectGaps(container: HTMLElement, leading: boolean, internal: boolean, trailing: boolean) {
+  const description = container.querySelector('.state-timeline')?.getAttribute('aria-label')
+  expect(description).toContain(`Leading gap: ${leading ? 'yes' : 'no'}.`)
+  expect(description).toContain(`Internal gaps: ${internal ? 'yes' : 'no'}.`)
+  expect(description).toContain(`Trailing gap: ${trailing ? 'yes' : 'no'}.`)
+}
+
+function summaryValue(container: HTMLElement, label: string) {
+  const item = [...container.querySelectorAll('.history-summary > div')]
+    .find((element) => element.querySelector('span')?.textContent === label)
+  return item?.querySelector('strong')?.textContent
+}
+
+describe('history coverage and summaries', () => {
+  // Expected percentages are fixture-specific constants, not calculated by a geometry helper.
+  it.each([
+    { window: '15m', step: 5, count: 181, edgeWidth: 0.277777777778, middleLeft: 49.722222222222, middleWidth: 0.555555555556, lastLeft: 99.722222222222 },
+    { window: '1h', step: 15, count: 241, edgeWidth: 0.208333333333, middleLeft: 49.791666666667, middleWidth: 0.416666666667, lastLeft: 99.791666666667 },
+    { window: '6h', step: 60, count: 361, edgeWidth: 0.138888888889, middleLeft: 49.861111111111, middleWidth: 0.277777777778, lastLeft: 99.861111111111 },
+    { window: '24h', step: 300, count: 289, edgeWidth: 0.173611111111, middleLeft: 49.826388888889, middleWidth: 0.347222222222, lastLeft: 99.826388888889 },
+  ] as const)('positions a complete $window grid across its requested bounds', async (fixture) => {
+    const points = Array.from({ length: fixture.count }, (_, index) => [index * fixture.step, true] as const)
+    const { container } = await showHistory(timelineHistory(points, fixture.window))
+    const cells = timelineCells(container)
+    expect(cells).toHaveLength(fixture.count)
+    expectCell(cells[0], 0, fixture.edgeWidth)
+    expectCell(cells[(fixture.count - 1) / 2], fixture.middleLeft, fixture.middleWidth)
+    expectCell(cells.at(-1)!, fixture.lastLeft, fixture.edgeWidth)
+    expectGaps(container, false, false, false)
+    expect(summaryValue(container, 'State changes')).toBe('0')
+  })
+
+  it('leaves leading missing coverage neutral instead of stretching the first result to the start', async () => {
+    const points = Array.from({ length: 91 }, (_, index) => [450 + index * 5, true] as const)
+    const { container } = await showHistory(timelineHistory(points))
+    expectCell(timelineCells(container)[0], 49.722222222222, 0.555555555556)
+    expectGaps(container, true, false, false)
+  })
+
+  it('leaves trailing missing coverage neutral instead of stretching the final result to the end', async () => {
+    const points = Array.from({ length: 91 }, (_, index) => [index * 5, true] as const)
+    const { container } = await showHistory(timelineHistory(points))
+    expectCell(timelineCells(container).at(-1)!, 49.722222222222, 0.555555555556)
+    expectGaps(container, false, false, true)
+  })
+
+  it('leaves a missing internal query position neutral even when both neighboring states match', async () => {
+    const points = Array.from({ length: 181 }, (_, index) => [index * 5, true] as const)
+      .filter(([seconds]) => seconds !== 450)
+    const { container } = await showHistory(timelineHistory(points))
+    const cells = timelineCells(container)
+    expect(cells).toHaveLength(180)
+    expectCell(cells[89], 49.166666666667, 0.555555555556)
+    expectCell(cells[90], 50.277777777778, 0.555555555556)
+    expect(cells[89].className).toBe('timeline-up')
+    expect(cells[90].className).toBe('timeline-up')
+    expectGaps(container, false, true, false)
+    expect(summaryValue(container, 'State changes')).toBe('0')
+  })
+
+  it('keeps adjacent offline observations and nullable telemetry as observed offline data', async () => {
+    const { container } = await showHistory(timelineHistory([[445, true], [450, false], [455, false], [460, true]]))
+    expect(timelineCells(container).map((cell) => cell.className)).toEqual([
+      'timeline-up', 'timeline-down', 'timeline-down', 'timeline-up',
+    ])
+    expect(summaryValue(container, 'Samples')).toBe('4')
+    expect(summaryValue(container, 'Offline samples')).toBe('2')
+    expect(summaryValue(container, 'State changes')).toBe('2')
+    const offlineRows = [...container.querySelectorAll('tbody .offline-row')]
+    expect(offlineRows).toHaveLength(2)
+    for (const row of offlineRows) {
+      expect([...row.querySelectorAll('td')].map((cell) => cell.textContent)).toEqual([
+        'Offline', '0', 'Not observed', 'Not observed', 'Not observed',
+      ])
+    }
+  })
+
+  it('keeps every numeric zero as an observed value, including latest clients', async () => {
+    const history = timelineHistory([[450, true]])
+    Object.assign(history.samples[0], {
+      clients: 0, channelUtilizationRatio: 0, managementLatencySeconds: 0, managementPacketLossRatio: 0,
+    })
+    const { container } = await showHistory(history)
+    expect(timelineCells(container)).toHaveLength(1)
+    expect(timelineCells(container)[0].className).toBe('timeline-up')
+    expect(summaryValue(container, 'Latest clients')).toBe('0')
+    expect(summaryValue(container, 'Offline samples')).toBe('0')
+    expect([...container.querySelectorAll('tbody td')].map((cell) => cell.textContent)).toEqual([
+      'Operational', '0', '0.0%', '0.0 ms', '0.0%',
+    ])
+  })
+
+  it('counts multiple genuine adjacent state transitions exactly', async () => {
+    const { container } = await showHistory(timelineHistory([[300, true], [305, false], [310, true], [315, false]]))
+    expect(summaryValue(container, 'State changes')).toBe('3')
+  })
+
+  it('does not count opposite states across a gap as a transition', async () => {
+    const { container } = await showHistory(timelineHistory([[300, true], [305, false], [315, true], [320, false]]))
+    expect(summaryValue(container, 'State changes')).toBe('2')
+  })
+
+  it('positions sparse ordered samples by elapsed time without inventing observations', async () => {
+    const { container } = await showHistory(timelineHistory([[0, true], [300, false], [900, true]]))
+    const cells = timelineCells(container)
+    expect(cells).toHaveLength(3)
+    expectCell(cells[0], 0, 0.277777777778)
+    expectCell(cells[1], 33.055555555556, 0.555555555556)
+    expectCell(cells[2], 99.722222222222, 0.277777777778)
+    expectGaps(container, false, true, false)
+    expect(summaryValue(container, 'Samples')).toBe('3')
+    expect(summaryValue(container, 'State changes')).toBe('0')
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(3)
+  })
+
+  it('keeps ten minutes of collection within its small region of a 24-hour request', async () => {
+    const { container } = await showHistory(timelineHistory([[85800, true], [86100, false], [86400, true]], '24h'))
+    const cells = timelineCells(container)
+    expect(cells).toHaveLength(3)
+    expectCell(cells[0], 99.131944444444, 0.347222222222)
+    expectCell(cells[1], 99.479166666667, 0.347222222222)
+    expectCell(cells[2], 99.826388888889, 0.173611111111)
+    expectGaps(container, true, false, false)
+  })
+
+  it.each([
+    { seconds: 0, left: 0, leading: false, trailing: true },
+    { seconds: 900, left: 99.722222222222, leading: true, trailing: false },
+  ])('keeps a single observation at boundary $seconds visible as a half cell', async ({ seconds, left, leading, trailing }) => {
+    const { container } = await showHistory(timelineHistory([[seconds, true]]))
+    const cells = timelineCells(container)
+    expect(cells).toHaveLength(1)
+    expectCell(cells[0], left, 0.277777777778)
+    expectGaps(container, leading, false, trailing)
+  })
+
+  it('clips near-boundary cells while preserving the missing interior', async () => {
+    const { container } = await showHistory(timelineHistory([[0.001, true], [899.999, false]]))
+    const cells = timelineCells(container)
+    expectCell(cells[0], 0, 0.277888888889)
+    expectCell(cells[1], 99.722111111111, 0.277888888889)
+    expectGaps(container, false, true, false)
+    expect(summaryValue(container, 'State changes')).toBe('0')
+  })
+
+  it('compares equivalent timestamp encodings by their instants', async () => {
+    const history = timelineHistory([[300, true], [305, false]])
+    history.samples[0].observedAtUtc = '2026-09-10T07:50:00-04:00'
+    history.samples[1].observedAtUtc = '2026-09-10T11:50:05.000Z'
+    const { container } = await showHistory(history)
+    expect(summaryValue(container, 'State changes')).toBe('1')
+  })
+
+  it.each([
+    { delta: 4.999, changes: '1' },
+    { delta: 5, changes: '1' },
+    { delta: 5.001, changes: '1' },
+    { delta: 4.998, changes: '0' },
+    { delta: 5.002, changes: '0' },
+    { delta: 9.999, changes: '0' },
+    { delta: 10, changes: '0' },
+  ])('uses only the one-millisecond adjacency allowance for a $delta-second separation', async ({ delta, changes }) => {
+    const { container } = await showHistory(timelineHistory([[300, true], [300 + delta, false]]))
+    expect(summaryValue(container, 'State changes')).toBe(changes)
+  })
+
+  it.each([
+    { delta: 4.999, firstWidth: 0.5555, secondLeft: 33.611055555556 },
+    { delta: 5.001, firstWidth: 0.555611111111, secondLeft: 33.611166666667 },
+  ])('meets at a shared midpoint for permitted $delta-second rounding', async ({ delta, firstWidth, secondLeft }) => {
+    const { container } = await showHistory(timelineHistory([[300, true], [300 + delta, false]]))
+    const cells = timelineCells(container)
+    expectCell(cells[0], 33.055555555556, firstWidth)
+    expectCell(cells[1], secondLeft, firstWidth)
+    expectGaps(container, true, false, true)
+  })
+
+  it.each([
+    { delta: 4.998, width: 0.555333333333, secondLeft: 33.611111111111 },
+    { delta: 5.002, width: 0.555555555556, secondLeft: 33.611333333333 },
+  ])('keeps cells separated outside the rounding allowance at $delta seconds', async ({ delta, width, secondLeft }) => {
+    const { container } = await showHistory(timelineHistory([[300, true], [300 + delta, false]]))
+    const cells = timelineCells(container)
+    expectCell(cells[0], 33.055555555556, width)
+    expectCell(cells[1], secondLeft, width)
+    expectGaps(container, true, true, true)
+    expect(summaryValue(container, 'State changes')).toBe('0')
+  })
+
+  it('exposes bounds, resolution, offline count, gap categories, and the meaning of cells accessibly', async () => {
+    const history = timelineHistory([[300, false], [600, true]])
+    const { container } = await showHistory(history)
+    const timeline = container.querySelector('.state-timeline')!
+    expect(timeline.getAttribute('role')).toBe('img')
+    expect(timeline.getAttribute('aria-label')).toContain(history.startUtc)
+    expect(timeline.getAttribute('aria-label')).toContain(history.endUtc)
+    expect(timeline.getAttribute('aria-label')).toContain('5s resolution')
+    expect(timeline.getAttribute('aria-label')).toContain('1 of 2 samples were offline')
+    expectGaps(container, true, true, true)
+    const descriptionId = timeline.getAttribute('aria-describedby')
+    expect(descriptionId).toBeTruthy()
+    expect(document.getElementById(descriptionId!)?.textContent).toBe(
+      'Cell width represents query resolution, not measured state duration. Empty areas were not observed. State changes compare adjacent samples.',
+    )
+    expect(container.querySelector('.timeline-legend')?.textContent).toContain('Not observed')
+    expect(timelineCells(container)[0].title).toContain('Offline')
+    expect(timelineCells(container)[1].title).toContain('Operational')
+  })
+
+  it('retains the original response geometry and bounds through a failed same-selection refresh', async () => {
+    const history = timelineHistory([[450, true]])
+    const { container, fetch } = await showHistory(history)
+    const originalDescription = container.querySelector('.state-timeline')?.getAttribute('aria-label')
+    await advanceTime(5_000)
+    await fetch.history()[1].reject(new Error('Refresh unavailable'))
+    await advanceTime(5_000)
+    expectCell(timelineCells(container)[0], 49.722222222222, 0.555555555556)
+    expect(container.querySelector('.state-timeline')?.getAttribute('aria-label')).toBe(originalDescription)
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Refresh unavailable')
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Showing the most recent successful range response.')
+  })
+
+  it('recomputes geometry from replacement response bounds after successful recovery', async () => {
+    const history = timelineHistory([[450, true]])
+    const { container, fetch } = await showHistory(history)
+    await advanceTime(5_000)
+    await fetch.history()[1].reject(new Error('Refresh unavailable'))
+    await advanceTime(5_000)
+    const replacement = {
+      ...history,
+      startUtc: '2026-09-10T11:50:00.000Z',
+      endUtc: '2026-09-10T12:05:00.000Z',
+    }
+    await fetch.history()[2].json(replacement)
+    expectCell(timelineCells(container)[0], 16.388888888889, 0.555555555556)
+    expect(container.querySelector('.state-timeline')?.getAttribute('aria-label')).toContain(replacement.startUtc)
+    expect(container.querySelector('.state-timeline')?.getAttribute('aria-label')).toContain(replacement.endUtc)
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+  })
+})

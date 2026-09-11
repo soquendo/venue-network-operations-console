@@ -317,7 +317,8 @@ tbody tr:last-child td {
 
 .history-summary span,
 .timeline-heading span,
-.timeline-legend {
+.timeline-legend,
+.timeline-explanation {
   color: var(--text-muted);
   font-size: 0.76rem;
 }
@@ -341,8 +342,7 @@ tbody tr:last-child td {
 }
 
 .state-timeline {
-  display: flex;
-  gap: 1px;
+  position: relative;
   height: 26px;
   overflow: hidden;
   border-radius: 4px;
@@ -350,8 +350,9 @@ tbody tr:last-child td {
 }
 
 .state-timeline span {
-  min-width: 1px;
-  flex: 1 1 0;
+  position: absolute;
+  top: 0;
+  bottom: 0;
 }
 
 .timeline-up,
@@ -366,6 +367,7 @@ tbody tr:last-child td {
 
 .timeline-legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   margin-top: 9px;
 }
@@ -381,6 +383,14 @@ tbody tr:last-child td {
   width: 9px;
   height: 9px;
   border-radius: 2px;
+}
+
+.legend-unobserved {
+  background: var(--border);
+}
+
+.timeline-explanation {
+  margin: 9px 0 0;
 }
 
 .recent-history .table-scroll {
