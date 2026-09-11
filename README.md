@@ -4,6 +4,8 @@ This portfolio project simulates network operations for a fictional convention v
 
 Milestone 1 proved the telemetry pipeline end to end. Milestone 2 added a fixed all-AP/all-zone API contract and a minimal React/TypeScript operations overview. Milestone 3 adds bounded Prometheus range queries and an AP history panel with explicit missing-observation gaps.
 
+Milestone 4 hardens dependency validation, frontend request ownership, sparse-history rendering, and IPv4-loopback container publication. Integrated verification covers hosted dependency failure, rendered frontend recovery, and preservation of monitoring data.
+
 ## Local development
 
 Start the monitoring stack:
@@ -27,3 +29,4 @@ Open <http://localhost:5173>.
 - [Milestone 1 viability proof](docs/viability.md)
 - [Milestone 2 operations overview](docs/milestone-2.md)
 - [Milestone 3 access point history](docs/milestone-3.md)
+- [Milestone 4 integrated verification](docs/milestone-4.md)
