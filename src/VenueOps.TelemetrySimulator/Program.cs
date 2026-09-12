@@ -7,6 +7,7 @@ Metrics.SuppressDefaultMetrics();
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHealthChecks();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<AccessPointStateStore>();
 builder.Services.AddSingleton(Metrics.DefaultRegistry);
 builder.Services.AddSingleton<AccessPointMetricsPublisher>();
@@ -51,6 +52,7 @@ app.MapPut("/simulation/access-points/{apId}", (
 });
 
 app.MapGet("/simulation/event-day", (AccessPointStateStore accessPoints) => accessPoints.GetEventDay());
+app.MapPost("/simulation/event-day/start", (AccessPointStateStore accessPoints) => accessPoints.StartEventDay());
 app.MapPut("/simulation/event-day/position", (EventPositionRequest request, AccessPointStateStore accessPoints) =>
 {
     if (request.ElapsedMinutes is not int minute || minute is < 0 or > 660)

@@ -195,8 +195,7 @@ try:
         assert request(SIM, "/simulation/event-day") == baseline
     request(SIM, "/simulation/access-points/ap-999", "PUT", {"scenario": "healthy"}, 404)
     request(SIM, "/simulation/access-points/ap-001", "PUT", {"scenario": "unsupported"}, 400)
-    request(SIM, "/simulation/event-day/start", "POST", expected_status=404)
-    print("PASS: invalid controls are non-mutating; automatic start is absent", flush=True)
+    print("PASS: invalid controls are non-mutating", flush=True)
 
     first = request(SIM, "/simulation/event-day/position", "PUT", {"elapsedMinutes": 0})
     assert request(SIM, "/simulation/event-day/position", "PUT", {"elapsedMinutes": 0}) == first

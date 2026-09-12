@@ -3,7 +3,9 @@ namespace VenueOps.TelemetrySimulator;
 public sealed class AccessPointStateStore
 {
     private readonly Lock _lock = new();
+    private readonly TimeProvider _timeProvider;
     private EventDayPosition? _heldPosition;
+    private long? _runStartedTimestamp;
     private readonly Dictionary<string, AccessPointState> _accessPoints = new(StringComparer.OrdinalIgnoreCase)
     {
         ["ap-001"] = new(new("ap-001", "zone-a", 42, 0.55m, 0.018m, 0.002m)),
@@ -12,11 +14,15 @@ public sealed class AccessPointStateStore
         ["ap-004"] = new(new("ap-004", "zone-b", 31, 0.46m, 0.017m, 0.002m))
     };
 
+    public AccessPointStateStore() : this(TimeProvider.System) { }
+
+    public AccessPointStateStore(TimeProvider timeProvider) => _timeProvider = timeProvider;
+
     public IReadOnlyList<AccessPointSnapshot> GetAll()
     {
         lock (_lock)
         {
-            return SnapshotAccessPoints();
+            return SnapshotAccessPoints(ResolvePosition().Position);
         }
     }
 
@@ -25,11 +31,24 @@ public sealed class AccessPointStateStore
         lock (_lock) return SnapshotEventDay();
     }
 
+    public EventDaySnapshot StartEventDay()
+    {
+        lock (_lock)
+        {
+            _runStartedTimestamp = _timeProvider.GetTimestamp();
+            _heldPosition = null;
+            foreach (var accessPoint in _accessPoints.Values) accessPoint.Scenario = AccessPointScenario.Healthy;
+            // The command response uses the anchor itself, even if execution is delayed.
+            return SnapshotEventDay(_runStartedTimestamp);
+        }
+    }
+
     public EventDaySnapshot SetEventPosition(int elapsedMinutes)
     {
         var position = EventDayScenario.Evaluate(elapsedMinutes);
         lock (_lock)
         {
+            _runStartedTimestamp = null;
             _heldPosition = position;
             return SnapshotEventDay();
         }
@@ -39,6 +58,7 @@ public sealed class AccessPointStateStore
     {
         lock (_lock)
         {
+            _runStartedTimestamp = null;
             _heldPosition = null;
             foreach (var accessPoint in _accessPoints.Values) accessPoint.Scenario = AccessPointScenario.Healthy;
             return SnapshotEventDay();
@@ -46,15 +66,30 @@ public sealed class AccessPointStateStore
     }
 
     // Called only while holding the state lock; returned records are detached from mutable state.
-    private IReadOnlyList<AccessPointSnapshot> SnapshotAccessPoints() => Array.AsReadOnly(_accessPoints.Values
+    private IReadOnlyList<AccessPointSnapshot> SnapshotAccessPoints(EventDayPosition? position) => Array.AsReadOnly(_accessPoints.Values
         .OrderBy(accessPoint => accessPoint.Baseline.ApId, StringComparer.Ordinal)
-        .Select(accessPoint => accessPoint.ToSnapshot(_heldPosition?.NormalizedLoad ?? 0m))
+        .Select(accessPoint => accessPoint.ToSnapshot(position?.NormalizedLoad ?? 0m))
         .ToArray());
 
-    private EventDaySnapshot SnapshotEventDay() => new(
-        EventDayScenario.Name, _heldPosition is null ? "baseline" : "held",
-        _heldPosition?.ElapsedMinutes, _heldPosition?.Phase,
-        _heldPosition?.NormalizedLoad ?? 0m, SnapshotAccessPoints());
+    private EventDaySnapshot SnapshotEventDay(long? capturedTimestamp = null)
+    {
+        var (mode, position) = ResolvePosition(capturedTimestamp);
+        return new(EventDayScenario.Name, mode, position?.ElapsedMinutes, position?.Phase,
+            position?.NormalizedLoad ?? 0m, SnapshotAccessPoints(position));
+    }
+
+    // Called under the state lock. Completion is derived, so reads never mutate the run.
+    private (string Mode, EventDayPosition? Position) ResolvePosition(long? capturedTimestamp = null)
+    {
+        if (_runStartedTimestamp is long started)
+        {
+            var now = capturedTimestamp ?? _timeProvider.GetTimestamp();
+            var elapsed = _timeProvider.GetElapsedTime(started, now);
+            var minute = (int)Math.Clamp(elapsed.Ticks / TimeSpan.TicksPerSecond, 0L, 660L);
+            return (minute == 660 ? "completed" : "running", EventDayScenario.Evaluate(minute));
+        }
+        return (_heldPosition is null ? "baseline" : "held", _heldPosition);
+    }
 
     public bool TrySetScenario(
         string apId,
@@ -70,7 +105,7 @@ public sealed class AccessPointStateStore
             }
 
             accessPoint.Scenario = scenario;
-            snapshot = accessPoint.ToSnapshot(_heldPosition?.NormalizedLoad ?? 0m);
+            snapshot = accessPoint.ToSnapshot(ResolvePosition().Position?.NormalizedLoad ?? 0m);
             return true;
         }
     }

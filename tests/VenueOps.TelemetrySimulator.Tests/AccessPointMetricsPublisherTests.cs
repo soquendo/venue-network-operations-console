@@ -8,6 +8,47 @@ namespace VenueOps.TelemetrySimulator.Tests;
 public sealed class AccessPointMetricsPublisherTests
 {
     [Fact]
+    public async Task RunningExportRetainsCapturedPositionAndQueuedExportResolvesTimeAfterOwnershipTransfers()
+    {
+        var clock = new ControlledEventTimeProvider();
+        var store = new AccessPointStateStore(clock);
+        store.StartEventDay();
+        clock.Advance(TimeSpan.FromSeconds(239.999));
+        var registry = Metrics.NewCustomRegistry();
+        var publisher = new AccessPointMetricsPublisher(registry);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var firstBody = new MemoryStream();
+        var first = publisher.ExportAsync(store.GetAll, async () =>
+        {
+            await release.Task;
+            await registry.CollectAndExportAsTextAsync(firstBody);
+        }, CancellationToken.None);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        var reads = clock.TimestampReads;
+        using var secondBody = new MemoryStream();
+        var second = publisher.ExportAsync(store.GetAll,
+            () => registry.CollectAndExportAsTextAsync(secondBody), CancellationToken.None);
+        try
+        {
+            Assert.False(second.IsCompleted);
+            Assert.Equal(reads, clock.TimestampReads);
+            clock.Advance(TimeSpan.FromSeconds(120));
+        }
+        finally { release.TrySetResult(); }
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+
+        foreach (var (minute, body) in new[] { (239, firstBody), (360, secondBody) })
+        {
+            var manual = new AccessPointStateStore();
+            manual.SetEventPosition(minute);
+            var expectedRegistry = Metrics.NewCustomRegistry();
+            var expected = await Export(new AccessPointMetricsPublisher(expectedRegistry), expectedRegistry, manual);
+            Assert.Equal(expected.Split('\n').Order(StringComparer.Ordinal),
+                Encoding.UTF8.GetString(body.ToArray()).Split('\n').Order(StringComparer.Ordinal));
+        }
+    }
+
+    [Fact]
     public async Task ExportsOnlyExistingVenueFamiliesAndRestoresRemovedOfflineSeries()
     {
         var store = new AccessPointStateStore();
