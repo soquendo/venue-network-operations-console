@@ -6,23 +6,24 @@ Milestone 1 proved the telemetry pipeline end to end. Milestone 2 added a fixed 
 
 Milestone 4 hardens dependency validation, frontend request ownership, sparse-history rendering, and IPv4-loopback container publication. Integrated verification covers hosted dependency failure, rendered frontend recovery, and preservation of monitoring data.
 
+Milestone 5 adds deterministic synthetic event-day degradation with manual positioning and approximately 11-minute automatic playback. Prometheus collection and alert evaluation, API quality classification, and the existing overview/history show buildup, degradation, and recovery. See the [Milestone 5 model, demo, and verification evidence](docs/milestone-5.md).
+
 ## Local development
 
-Start the monitoring stack:
+Initial setup: build and start the monitoring stack:
 
 ```bash
 docker compose up --build --detach --wait
 ```
 
-Start the frontend in a second terminal:
+Use the maintained Node 22.23.2 environment and project npm 11.19.1 through Corepack. From the repository root, provision and start the frontend in a second terminal:
 
 ```bash
-cd src/VenueOps.Web
-npm ci
-npm run dev
+corepack npm@11.19.1 --prefix src/VenueOps.Web ci
+corepack npm@11.19.1 --prefix src/VenueOps.Web run dev -- --host 127.0.0.1
 ```
 
-Open <http://localhost:5173>.
+Open <http://127.0.0.1:5173>. For subsequent event demonstrations with existing dependencies and images, use the [Milestone 5 demo](docs/milestone-5.md#how-to-demo) without reinstalling or rebuilding.
 
 ## Documentation
 
@@ -30,3 +31,4 @@ Open <http://localhost:5173>.
 - [Milestone 2 operations overview](docs/milestone-2.md)
 - [Milestone 3 access point history](docs/milestone-3.md)
 - [Milestone 4 integrated verification](docs/milestone-4.md)
+- [Milestone 5 event-day load and degradation](docs/milestone-5.md)
