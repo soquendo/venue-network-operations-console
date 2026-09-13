@@ -8,6 +8,7 @@ public sealed class Incident
     private readonly List<IncidentEvent> _events = [];
     private Incident() { }
     public long Id { get; private set; }
+    public Guid? CreationCommandId { get; private set; }
     public string Title { get; private set; } = "";
     public string Zone { get; private set; } = "";
     public string Status { get; private set; } = "Open";
@@ -42,6 +43,7 @@ public sealed class Incident
         }
         var incident = new Incident
         {
+            CreationCommandId = request.CreationCommandId,
             Title = request.Title!.Trim(), Zone = selected[0].Ap.Zone,
             ResponderLabel = string.IsNullOrWhiteSpace(request.ResponderLabel) ? null : request.ResponderLabel.Trim(),
             CreatedAtUtc = createdAtUtc, MonitoringCaptureAtUtc = AtDatabasePrecision(capture.CapturedAtUtc),
@@ -51,6 +53,22 @@ public sealed class Incident
             incident._accessPoints.Add(new IncidentAccessPointContext(ap, capture.ActiveAlerts));
         incident._events.Add(new IncidentEvent(createdAtUtc, incident.ResponderLabel));
         return incident;
+    }
+
+    public bool MatchesCreationIntent(CreateIncidentRequest request, IncidentEvent created)
+    {
+        request.Validate();
+        // Current responder/status can change. Only immutable creation evidence
+        // and the original Created event define the intent of a creation retry.
+        if (created.Kind != "Created" || created.Sequence != 1
+            || Title != request.Title!.Trim()
+            || created.ResponderLabel != (string.IsNullOrWhiteSpace(request.ResponderLabel) ? null : request.ResponderLabel.Trim()))
+            return false;
+        var expected = request.AccessPoints!.OrderBy(ap => ap.ApId, StringComparer.Ordinal)
+            .Select(ap => (ap.ApId, ap.ExpectedCondition));
+        var captured = _accessPoints.OrderBy(ap => ap.ApId, StringComparer.Ordinal)
+            .Select(ap => ((string?)ap.ApId, !ap.Operational ? "offline" : ap.Degraded ? "degraded" : null));
+        return expected.SequenceEqual(captured);
     }
 
     // PostgreSQL timestamps have microsecond precision. Normalize before returning the

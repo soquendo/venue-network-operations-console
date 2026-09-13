@@ -6,6 +6,9 @@ public static class IncidentEndpoints
 {
     public static void MapIncidentEndpoints(this WebApplication app)
     {
+        app.MapGet("/api/incidents", (string? status, string? zone, long? beforeId, IncidentService service, CancellationToken cancellationToken) =>
+            ExecuteAsync(async token => Results.Ok(await service.ListAsync(new(status, zone, beforeId), token)), cancellationToken));
+
         app.MapPost("/api/incidents", (CreateIncidentRequest request, IncidentService service, CancellationToken cancellationToken) =>
             ExecuteAsync(async token =>
             {
@@ -43,14 +46,23 @@ public static class IncidentEndpoints
             ["code"] = exception.Code, ["currentVersion"] = exception.CurrentVersion, ["currentStatus"] = exception.CurrentStatus
         });
 
+    public static IResult CreationConflict(IncidentCreationConflictException exception) => Results.Problem(
+        statusCode: 409, title: "Incident creation conflict", detail: exception.Message,
+        extensions: new Dictionary<string, object?> { ["code"] = "creation_command_conflict" });
+
+    public static IResult ConditionConflict(IncidentConditionChangedException exception) => Results.Problem(
+        statusCode: 409, title: "Monitoring condition changed", detail: exception.Message,
+        extensions: new Dictionary<string, object?> { ["code"] = "condition_changed" });
+
     private static async Task<IResult> ExecuteAsync(Func<CancellationToken, Task<IResult>> action, CancellationToken requestCancellation)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(requestCancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
         try { return await action(timeout.Token); }
         catch (IncidentWorkflowConflictException exception) { return Conflict(exception); }
+        catch (IncidentCreationConflictException exception) { return CreationConflict(exception); }
         catch (IncidentValidationException exception) { return Results.Problem(statusCode: 400, title: "Invalid incident request", detail: exception.Message); }
-        catch (IncidentConditionChangedException exception) { return Results.Problem(statusCode: 409, title: "Monitoring condition changed", detail: exception.Message); }
+        catch (IncidentConditionChangedException exception) { return ConditionConflict(exception); }
         catch (Exception exception) when (exception is PrometheusQueryException or HttpRequestException)
         { return Results.Problem(statusCode: 503, title: "Prometheus telemetry is unavailable"); }
         catch (Exception exception) when (exception is IncidentStorageUnavailableException or System.Data.Common.DbException or DbUpdateException)

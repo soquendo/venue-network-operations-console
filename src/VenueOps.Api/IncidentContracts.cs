@@ -6,10 +6,13 @@ namespace VenueOps.Api;
 public sealed record CreateIncidentRequest(
     string? Title,
     IReadOnlyList<IncidentAccessPointRequest>? AccessPoints,
-    string? ResponderLabel = null)
+    string? ResponderLabel = null,
+    Guid? CreationCommandId = null)
 {
     public void Validate()
     {
+        if (CreationCommandId == Guid.Empty)
+            throw new IncidentValidationException("Creation command ID must be a non-empty UUID when supplied.");
         if (string.IsNullOrWhiteSpace(Title) || Title.Length > 200)
             throw new IncidentValidationException("Title must contain 1–200 characters.");
         if (ResponderLabel?.Length > 100)
@@ -26,6 +29,39 @@ public sealed record CreateIncidentRequest(
             if (ap.ExpectedCondition is not ("offline" or "degraded"))
                 throw new IncidentValidationException("Expected condition must be offline or degraded.");
         }
+    }
+}
+
+public sealed record IncidentListRequest(string? Status = null, string? Zone = null, long? BeforeId = null)
+{
+    public const int PageSize = 50;
+    public void Validate()
+    {
+        if (Status is not (null or "Open" or "Investigating" or "Monitoring" or "Resolved"))
+            throw new IncidentValidationException("Status must be Open, Investigating, Monitoring, or Resolved.");
+        if (Zone is not null && (string.IsNullOrWhiteSpace(Zone) || Zone.Length > 64))
+            throw new IncidentValidationException("Zone must contain 1–64 characters when supplied.");
+        if (Zone?.Contains('\0') == true)
+            throw new IncidentValidationException("Zone must not contain NUL characters.");
+        if (BeforeId is <= 0)
+            throw new IncidentValidationException("Before ID must be positive.");
+    }
+}
+
+public sealed record IncidentSummary(long Id, string Title, string Status, string Zone,
+    string? ResponderLabel, DateTimeOffset CreatedAtUtc, DateTimeOffset? ResolvedAtUtc,
+    long Version, int AffectedAccessPointCount)
+{
+    public string Number => Incident.FormatNumber(Id);
+}
+
+public sealed record IncidentListResponse(IReadOnlyList<IncidentSummary> Items, bool HasMore, long? NextBeforeId)
+{
+    public static IncidentListResponse Page(IReadOnlyList<IncidentSummary> rows)
+    {
+        var items = rows.Take(IncidentListRequest.PageSize).ToArray();
+        var more = rows.Count > IncidentListRequest.PageSize;
+        return new(items, more, more ? items[^1].Id : null);
     }
 }
 
@@ -80,3 +116,4 @@ public sealed class IncidentWorkflowConflictException(string code, string messag
 }
 public sealed class IncidentValidationException(string message) : Exception(message);
 public sealed class IncidentConditionChangedException(string message) : Exception(message);
+public sealed class IncidentCreationConflictException(string message) : Exception(message);

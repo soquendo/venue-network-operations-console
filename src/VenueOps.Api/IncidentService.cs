@@ -9,12 +9,67 @@ public sealed class IncidentService(IncidentDbContext database, PrometheusClient
     {
         request.Validate();
         await IncidentPersistenceHealthCheck.EnsureReadyAsync(database, cancellationToken);
-        var capture = await prometheus.GetIncidentMonitoringCaptureAsync(cancellationToken);
-        var incident = Incident.Create(request, capture, timeProvider.GetUtcNow());
+        var replay = await FindCreationReplayAsync(request, cancellationToken);
+        if (replay is not null) return replay;
+        Incident incident;
+        try
+        {
+            var capture = await prometheus.GetIncidentMonitoringCaptureAsync(cancellationToken);
+            incident = Incident.Create(request, capture, timeProvider.GetUtcNow());
+        }
+        catch (Exception exception) when (IsCaptureFailure(exception) && !cancellationToken.IsCancellationRequested)
+        {
+            // A competing request may have committed while this capture failed.
+            // One bounded lookup can recover it; never retry capture or wait for it.
+            replay = await FindCreationReplayAsync(request, cancellationToken);
+            if (replay is not null) return replay;
+            throw;
+        }
         database.Incidents.Add(incident);
         // EF commits this complete graph in one transaction; monitoring I/O precedes it.
-        await database.SaveChangesAsync(cancellationToken);
+        try { await database.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException
+            { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: IncidentDbContext.CreationIndex })
+        {
+            database.ChangeTracker.Clear();
+            replay = await FindCreationReplayAsync(request, cancellationToken);
+            if (replay is not null) return replay;
+            throw;
+        }
         return incident.ToResponse();
+    }
+
+    private static bool IsCaptureFailure(Exception exception) => exception is IncidentConditionChangedException
+        or IncidentValidationException or PrometheusQueryException or HttpRequestException or OperationCanceledException;
+
+    private async Task<IncidentResponse?> FindCreationReplayAsync(CreateIncidentRequest request, CancellationToken cancellationToken)
+    {
+        if (request.CreationCommandId is null) return null;
+        var incident = await database.Incidents.AsNoTracking().Include(item => item.AccessPoints).AsSingleQuery()
+            .SingleOrDefaultAsync(item => item.CreationCommandId == request.CreationCommandId, cancellationToken);
+        if (incident is null) return null;
+        // Sequence 1 must be read directly: it need not be in the newest detail page.
+        var created = await database.Events.AsNoTracking()
+            .SingleAsync(entry => entry.IncidentId == incident.Id && entry.Sequence == 1, cancellationToken);
+        if (!incident.MatchesCreationIntent(request, created))
+            throw new IncidentCreationConflictException("This creation command ID was already used for different creation intent.");
+        // Reuse the current, version-fenced detail projection; workflow receipts
+        // keep their separate immutable replay contract.
+        return await GetAsync(incident.Id, cancellationToken);
+    }
+
+    public async Task<IncidentListResponse> ListAsync(IncidentListRequest request, CancellationToken cancellationToken) =>
+        IncidentListResponse.Page(await ListQuery(database.Incidents.AsNoTracking(), request).ToArrayAsync(cancellationToken));
+
+    public static IQueryable<IncidentSummary> ListQuery(IQueryable<Incident> incidents, IncidentListRequest request)
+    {
+        request.Validate();
+        if (request.Status is not null) incidents = incidents.Where(item => item.Status == request.Status);
+        if (request.Zone is not null) incidents = incidents.Where(item => item.Zone == request.Zone);
+        if (request.BeforeId.HasValue) incidents = incidents.Where(item => item.Id < request.BeforeId.Value);
+        return incidents.OrderByDescending(item => item.Id).Take(IncidentListRequest.PageSize + 1)
+            .Select(item => new IncidentSummary(item.Id, item.Title, item.Status, item.Zone,
+                item.ResponderLabel, item.CreatedAtUtc, item.ResolvedAtUtc, item.Version, item.AccessPoints.Count));
     }
 
     public async Task<IncidentResponse?> GetAsync(long id, CancellationToken cancellationToken, long? beforeEventSequence = null)

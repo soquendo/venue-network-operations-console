@@ -8,6 +8,7 @@ public sealed class IncidentDbContext(DbContextOptions<IncidentDbContext> option
 {
     public const string CommandIndex = "IX_IncidentEvents_IncidentId_CommandId";
     public const string SequenceIndex = "IX_IncidentEvents_IncidentId_Sequence";
+    public const string CreationIndex = "IX_Incidents_CreationCommandId";
     public DbSet<Incident> Incidents => Set<Incident>();
     public DbSet<IncidentAccessPointContext> AccessPoints => Set<IncidentAccessPointContext>();
     public DbSet<IncidentEvent> Events => Set<IncidentEvent>();
@@ -35,6 +36,8 @@ public sealed class IncidentDbContext(DbContextOptions<IncidentDbContext> option
         });
         incident.HasKey(item => item.Id);
         incident.Property(item => item.Id).UseIdentityByDefaultColumn();
+        incident.HasIndex(item => item.CreationCommandId).IsUnique()
+            .HasFilter("\"CreationCommandId\" IS NOT NULL").HasDatabaseName(CreationIndex);
         incident.Property(item => item.Title).HasMaxLength(200);
         incident.Property(item => item.Zone).HasMaxLength(64);
         incident.Property(item => item.Status).HasMaxLength(20);

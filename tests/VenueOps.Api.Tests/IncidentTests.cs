@@ -9,6 +9,16 @@ public sealed class IncidentTests
     private static readonly DateTimeOffset Captured = DateTimeOffset.Parse("2026-09-13T01:00:00Z");
 
     [Fact]
+    public void LegacyCreationDoesNotInventAKeyOrReserveAWorkflowCommand()
+    {
+        var request = new CreateIncidentRequest("Issue", [new("ap-001", "degraded")]);
+        var incident = Incident.Create(request, Capture([Ap("ap-001")]), Captured);
+        Assert.Null(incident.CreationCommandId);
+        Assert.Null(Assert.Single(incident.Events).CommandId);
+        Assert.Equal(1, incident.Version);
+    }
+
+    [Fact]
     public void CreationExposesInitialWorkflowVersionAndChronology()
     {
         var incident = Incident.Create(new("Issue", [new("ap-001", "degraded")], "Venue team"), Capture([Ap("ap-001")]), Captured);

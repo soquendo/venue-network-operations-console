@@ -221,7 +221,7 @@ try:
                 dict(offline,accessPoints=[{'apId':'ap-001','expectedCondition':'offline'},{'apId':'ap-003','expectedCondition':'offline'}])]:
         expect(base+'/api/incidents',400,'POST',bad)
     expect(base+'/api/incidents/999999',404)
-    assert request(base+'/api/incidents')[0] == 405, 'List endpoint is not Task 1'
+    assert expect(base+'/api/incidents') == {'items': [], 'hasMore': False, 'nextBeforeId': None}, 'Empty bounded incident list'
     assert counts() == '0|0|0'
     expect('http://127.0.0.1:8081/simulation/access-points/ap-001',method='PUT',body={'scenario':'offline'})
     def outage():
