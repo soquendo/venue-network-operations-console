@@ -44,7 +44,8 @@ public sealed record IncidentMonitoringCapture(
 public sealed record IncidentResponse(
     long Id, string Number, string Title, string Zone, string Status,
     string? ResponderLabel, DateTimeOffset CreatedAtUtc,
-    IncidentEvidenceResponse MonitoringEvidence, IReadOnlyList<IncidentEventResponse> Events);
+    IncidentEvidenceResponse MonitoringEvidence, IReadOnlyList<IncidentEventResponse> Events,
+    long Version, DateTimeOffset? ResolvedAtUtc, bool HasEarlierEvents, long? NextBeforeEventSequence);
 
 public sealed record IncidentEvidenceResponse(
     DateTimeOffset CapturedAtUtc, DateTimeOffset GeneratedAtUtc,
@@ -57,6 +58,25 @@ public sealed record IncidentAccessPointResponse(
     string Source, DateTimeOffset ObservedAtUtc,
     IncidentAlertObservation? DownAlert, IncidentAlertObservation? DegradationAlert);
 
-public sealed record IncidentEventResponse(long Id, string Kind, DateTimeOffset OccurredAtUtc);
+public sealed record IncidentEventResponse(long Id, string Kind, DateTimeOffset OccurredAtUtc,
+    long Sequence, Guid? CommandId, string? Text, string? FromStatus, string? ToStatus,
+    string? PreviousResponderLabel, string? ResponderLabel);
+public sealed record IncidentCommandReceipt(long IncidentId, Guid CommandId, long Version, IncidentEventResponse Event);
+public sealed record IncidentEventPage(IReadOnlyList<IncidentEventResponse> Events, bool HasEarlierEvents, long? NextBeforeEventSequence);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record AddIncidentNoteRequest(Guid CommandId, long ExpectedVersion, string? Text);
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record TransitionIncidentRequest(Guid CommandId, long ExpectedVersion, string? Status, string? Note = null);
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ChangeIncidentResponderRequest(Guid CommandId, long ExpectedVersion,
+    [property: JsonRequired] string? ResponderLabel);
+
+public sealed class IncidentWorkflowConflictException(string code, string message, long? currentVersion = null, string? currentStatus = null) : Exception(message)
+{
+    public string Code { get; } = code;
+    public long? CurrentVersion { get; } = currentVersion;
+    public string? CurrentStatus { get; } = currentStatus;
+}
 public sealed class IncidentValidationException(string message) : Exception(message);
 public sealed class IncidentConditionChangedException(string message) : Exception(message);

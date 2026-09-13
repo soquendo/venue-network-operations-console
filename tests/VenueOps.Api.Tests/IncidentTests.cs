@@ -9,6 +9,23 @@ public sealed class IncidentTests
     private static readonly DateTimeOffset Captured = DateTimeOffset.Parse("2026-09-13T01:00:00Z");
 
     [Fact]
+    public void CreationExposesInitialWorkflowVersionAndChronology()
+    {
+        var incident = Incident.Create(new("Issue", [new("ap-001", "degraded")], "Venue team"), Capture([Ap("ap-001")]), Captured);
+        var json = JsonSerializer.SerializeToElement(incident.ToResponse(), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.True(json.TryGetProperty("version", out var version));
+        Assert.Equal(1, version.GetInt64());
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("resolvedAtUtc").ValueKind);
+        Assert.False(json.GetProperty("hasEarlierEvents").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("nextBeforeEventSequence").ValueKind);
+        var created = json.GetProperty("events")[0];
+        Assert.Equal(1, created.GetProperty("sequence").GetInt64());
+        Assert.Equal("Open", created.GetProperty("toStatus").GetString());
+        Assert.Equal("Venue team", created.GetProperty("responderLabel").GetString());
+        Assert.Equal(JsonValueKind.Null, created.GetProperty("commandId").ValueKind);
+    }
+
+    [Fact]
     public void CreatesOneOpenIncidentWithImmutableEvidenceAndOneCreatedEvent()
     {
         var points = new[] { Ap("ap-001"), Ap("ap-002") };

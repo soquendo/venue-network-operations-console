@@ -12,6 +12,8 @@ public sealed class Incident
     public string Zone { get; private set; } = "";
     public string Status { get; private set; } = "Open";
     public string? ResponderLabel { get; private set; }
+    public long Version { get; private set; } = 1;
+    public DateTimeOffset? ResolvedAtUtc { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset MonitoringCaptureAtUtc { get; private set; }
     public DateTimeOffset OverviewGeneratedAtUtc { get; private set; }
@@ -47,7 +49,7 @@ public sealed class Incident
         };
         foreach (var (_, ap) in selected.OrderBy(item => item.Ap.ApId, StringComparer.Ordinal))
             incident._accessPoints.Add(new IncidentAccessPointContext(ap, capture.ActiveAlerts));
-        incident._events.Add(new IncidentEvent(createdAtUtc));
+        incident._events.Add(new IncidentEvent(createdAtUtc, incident.ResponderLabel));
         return incident;
     }
 
@@ -56,9 +58,30 @@ public sealed class Incident
     internal static DateTimeOffset AtDatabasePrecision(DateTimeOffset value) => new(value.UtcTicks - value.UtcTicks % 10, TimeSpan.Zero);
 
     public static string FormatNumber(long id) => "INC-" + id.ToString("D6", CultureInfo.InvariantCulture);
-    public IncidentResponse ToResponse() => new(Id, FormatNumber(Id), Title, Zone, Status, ResponderLabel, CreatedAtUtc,
-        new(MonitoringCaptureAtUtc, OverviewGeneratedAtUtc, _accessPoints.OrderBy(ap => ap.ApId, StringComparer.Ordinal).Select(ap => ap.ToResponse()).ToArray()),
-        _events.OrderBy(item => item.Id).Select(item => new IncidentEventResponse(item.Id, item.Kind, item.OccurredAtUtc)).ToArray());
+    public IncidentEvent Apply(IncidentCommand command, DateTimeOffset occurredAtUtc)
+    {
+        IncidentWorkflow.ValidateState(this, command);
+        var timestamp = AtDatabasePrecision(occurredAtUtc);
+        var sequence = checked(Version + 1);
+        var entry = new IncidentEvent(Id, sequence, command, timestamp, Status, ResponderLabel);
+        if (command.Kind == "StatusChanged")
+        {
+            Status = command.Status!;
+            ResolvedAtUtc = Status == "Resolved" ? timestamp : null;
+        }
+        if (command.Kind == "ResponderChanged") ResponderLabel = command.ResponderLabel;
+        Version = sequence;
+        _events.Add(entry);
+        return entry;
+    }
+
+    public IncidentResponse ToResponse(IEnumerable<IncidentEvent>? events = null, long? beforeEventSequence = null)
+    {
+        var page = IncidentWorkflow.Page(events ?? _events, Version, beforeEventSequence);
+        return new(Id, FormatNumber(Id), Title, Zone, Status, ResponderLabel, CreatedAtUtc,
+            new(MonitoringCaptureAtUtc, OverviewGeneratedAtUtc, _accessPoints.OrderBy(ap => ap.ApId, StringComparer.Ordinal).Select(ap => ap.ToResponse()).ToArray()),
+            page.Events, Version, ResolvedAtUtc, page.HasEarlierEvents, page.NextBeforeEventSequence);
+    }
 }
 
 public sealed class IncidentAccessPointContext

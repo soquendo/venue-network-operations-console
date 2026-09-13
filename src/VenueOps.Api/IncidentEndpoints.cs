@@ -13,21 +13,42 @@ public static class IncidentEndpoints
                 return Results.Created($"/api/incidents/{incident.Id}", incident);
             }, cancellationToken));
 
-        app.MapGet("/api/incidents/{id:long:min(1)}", (long id, IncidentService service, CancellationToken cancellationToken) =>
+        app.MapGet("/api/incidents/{id:long:min(1)}", (long id, long? beforeEventSequence, IncidentService service, CancellationToken cancellationToken) =>
             ExecuteAsync(async token =>
             {
-                var incident = await service.GetAsync(id, token);
+                var incident = await service.GetAsync(id, token, beforeEventSequence);
                 return incident is null
                     ? Results.Problem(statusCode: 404, title: "Incident not found")
                     : Results.Ok(incident);
             }, cancellationToken));
+
+        app.MapPost("/api/incidents/{id:long:min(1)}/notes", (long id, AddIncidentNoteRequest request, IncidentService service, CancellationToken cancellationToken) =>
+            ExecuteAsync(token => CommandResultAsync(service, id, IncidentWorkflow.Note(request), token), cancellationToken));
+        app.MapPost("/api/incidents/{id:long:min(1)}/transitions", (long id, TransitionIncidentRequest request, IncidentService service, CancellationToken cancellationToken) =>
+            ExecuteAsync(token => CommandResultAsync(service, id, IncidentWorkflow.Transition(request), token), cancellationToken));
+        app.MapPut("/api/incidents/{id:long:min(1)}/responder", (long id, ChangeIncidentResponderRequest request, IncidentService service, CancellationToken cancellationToken) =>
+            ExecuteAsync(token => CommandResultAsync(service, id, IncidentWorkflow.Responder(request), token), cancellationToken));
     }
+
+    private static async Task<IResult> CommandResultAsync(IncidentService service, long id, IncidentCommand command, CancellationToken cancellationToken)
+    {
+        var receipt = await service.ExecuteCommandAsync(id, command, cancellationToken);
+        return receipt is null ? Results.Problem(statusCode: 404, title: "Incident not found") : Results.Ok(receipt);
+    }
+
+    public static IResult Conflict(IncidentWorkflowConflictException exception) => Results.Problem(
+        statusCode: 409, title: "Incident workflow conflict", detail: exception.Message,
+        extensions: new Dictionary<string, object?>
+        {
+            ["code"] = exception.Code, ["currentVersion"] = exception.CurrentVersion, ["currentStatus"] = exception.CurrentStatus
+        });
 
     private static async Task<IResult> ExecuteAsync(Func<CancellationToken, Task<IResult>> action, CancellationToken requestCancellation)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(requestCancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
         try { return await action(timeout.Token); }
+        catch (IncidentWorkflowConflictException exception) { return Conflict(exception); }
         catch (IncidentValidationException exception) { return Results.Problem(statusCode: 400, title: "Invalid incident request", detail: exception.Message); }
         catch (IncidentConditionChangedException exception) { return Results.Problem(statusCode: 409, title: "Monitoring condition changed", detail: exception.Message); }
         catch (Exception exception) when (exception is PrometheusQueryException or HttpRequestException)

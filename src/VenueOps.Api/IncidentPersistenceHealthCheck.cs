@@ -27,7 +27,8 @@ public sealed class IncidentPersistenceHealthCheck(IServiceScopeFactory scopes) 
         if (!await database.Database.CanConnectAsync(cancellationToken)
             || (await database.Database.GetPendingMigrationsAsync(cancellationToken)).Any())
             throw new IncidentStorageUnavailableException();
-        await database.Incidents.AsNoTracking().Include(item => item.AccessPoints).Include(item => item.Events)
+        await database.Incidents.AsNoTracking().Include(item => item.AccessPoints)
+            .Include(item => item.Events.OrderBy(entry => entry.Sequence).Take(1))
             .AsSingleQuery().Take(1).ToListAsync(cancellationToken);
     }
 }
