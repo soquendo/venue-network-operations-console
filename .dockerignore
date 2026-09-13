@@ -9,3 +9,5 @@
 .vscode
 TestResults
 sources
+.env
+.env.*

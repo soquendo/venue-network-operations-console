@@ -105,8 +105,32 @@ public sealed class PrometheusClient(HttpClient httpClient)
             new AlertObservation("VenueApDown", alertState, "derived"));
     }
 
-    public async Task<OperationsOverviewResponse> GetOperationsOverviewAsync(
-        CancellationToken cancellationToken)
+    public async Task<OperationsOverviewResponse> GetOperationsOverviewAsync(CancellationToken cancellationToken) =>
+        (await GetOverviewContextAsync(cancellationToken)).Overview;
+
+    public async Task<IncidentMonitoringCapture> GetIncidentMonitoringCaptureAsync(CancellationToken cancellationToken)
+    {
+        var context = await GetOverviewContextAsync(cancellationToken);
+        var alerts = context.DownAlerts.Select(alert => CaptureAlert(alert, "VenueApDown", "critical"))
+            .Concat(context.DegradationAlerts.Select(alert => CaptureAlert(alert, "VenueApDegraded", "warning"))).ToArray();
+        return new(context.Overview, alerts, DateTimeOffset.UtcNow);
+    }
+
+    private static IncidentAlertObservation CaptureAlert(PrometheusSample alert, string expectedName, string expectedSeverity)
+    {
+        var name = ReadRequiredLabel(alert, "alertname", expectedName);
+        var severity = ReadRequiredLabel(alert, "severity", expectedName);
+        var source = ReadRequiredLabel(alert, "telemetry_source", expectedName);
+        if (name != expectedName || severity != expectedSeverity || source != "simulated")
+            throw new PrometheusQueryException($"Invalid incident alert metadata for {expectedName}.");
+        return new(name, ReadRequiredLabel(alert, "alertstate", name), severity, source,
+            ReadRequiredLabel(alert, "ap_id", name), ReadRequiredLabel(alert, "zone", name), alert.ObservedAtUtc);
+    }
+
+    private sealed record OverviewContext(OperationsOverviewResponse Overview,
+        IReadOnlyList<PrometheusSample> DownAlerts, IReadOnlyList<PrometheusSample> DegradationAlerts);
+
+    private async Task<OverviewContext> GetOverviewContextAsync(CancellationToken cancellationToken)
     {
         var operationalTask = QueryVectorAsync("venue_ap_operational", cancellationToken);
         var clientsTask = QueryVectorAsync("venue_ap_clients", cancellationToken);
@@ -313,7 +337,7 @@ public sealed class PrometheusClient(HttpClient httpClient)
         var scrape = await scrapeTask;
         EnsureBinary(scrape.Value, "up");
 
-        return new OperationsOverviewResponse(
+        var overview = new OperationsOverviewResponse(
             DateTimeOffset.UtcNow,
             accessPoints,
             zones,
@@ -326,6 +350,7 @@ public sealed class PrometheusClient(HttpClient httpClient)
                 scrape.Value,
                 "measured",
                 scrape.ObservedAtUtc));
+        return new(overview, await alertsTask, await degradationAlertsTask);
     }
 
     public async Task<AccessPointHistoryResponse> GetAccessPointHistoryAsync(

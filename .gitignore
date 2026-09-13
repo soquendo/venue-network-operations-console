@@ -6,3 +6,6 @@
 .vscode/
 TestResults/
 sources/*.pdf
+.env
+.env.*
+!.env.example

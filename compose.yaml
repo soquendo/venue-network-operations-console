@@ -63,6 +63,10 @@ services:
       dockerfile: src/VenueOps.Api/Dockerfile
     environment:
       Prometheus__BaseUrl: http://prometheus:9090
+      Incidents__Host: incident-db
+      Incidents__Database: venueops_incidents
+      Incidents__Username: venueops
+      Incidents__Password: ${VENUE_INCIDENT_DB_PASSWORD:?Create or preserve the ignored repo-local .env; reuse the SAME password for an existing incident-data volume}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -80,5 +84,21 @@ services:
       retries: 10
       start_period: 5s
 
+  incident-db:
+    image: postgres:18.6-alpine3.23
+    environment:
+      POSTGRES_DB: venueops_incidents
+      POSTGRES_USER: venueops
+      POSTGRES_PASSWORD: ${VENUE_INCIDENT_DB_PASSWORD:?Create or preserve the ignored repo-local .env; reuse the SAME password for an existing incident-data volume}
+    volumes:
+      - incident-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U venueops -d venueops_incidents"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
 volumes:
   prometheus-data:
+  incident-data:

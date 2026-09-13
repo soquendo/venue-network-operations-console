@@ -1,11 +1,17 @@
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.EntityFrameworkCore;
 using Prometheus;
 using VenueOps.Api;
 
 Metrics.SuppressDefaultMetrics();
 
-var builder = WebApplication.CreateBuilder(args);
+var migrateIncidents = args.Contains("--migrate-incidents", StringComparer.Ordinal);
+var builder = WebApplication.CreateBuilder(args.Where(arg => arg != "--migrate-incidents").ToArray());
 
-builder.Services.AddHealthChecks();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddDbContext<IncidentDbContext>(options => options.UseNpgsql(IncidentDbContext.ConnectionString(builder.Configuration)));
+builder.Services.AddScoped<IncidentService>();
+builder.Services.AddHealthChecks().AddCheck<IncidentPersistenceHealthCheck>("incidents", tags: ["incidents"]);
 builder.Services.AddProblemDetails();
 
 var prometheusBaseUrl = builder.Configuration["Prometheus:BaseUrl"] ?? "http://localhost:9090";
@@ -17,9 +23,18 @@ builder.Services.AddHttpClient<PrometheusClient>(client =>
 
 var app = builder.Build();
 
+if (migrateIncidents)
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<IncidentDbContext>().Database.MigrateAsync();
+    return;
+}
+
 app.UseHttpMetrics();
 
-app.MapHealthChecks("/health/live");
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+app.MapHealthChecks("/health/ready/incidents", new HealthCheckOptions { Predicate = check => check.Tags.Contains("incidents") });
+app.MapIncidentEndpoints();
 app.MapMetrics();
 
 app.MapGet("/api/viability", async (PrometheusClient prometheus, CancellationToken cancellationToken) =>
