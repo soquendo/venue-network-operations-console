@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace VenueOps.Api;
 
@@ -54,6 +55,26 @@ public static class IncidentEndpoints
         statusCode: 409, title: "Monitoring condition changed", detail: exception.Message,
         extensions: new Dictionary<string, object?> { ["code"] = "condition_changed" });
 
+    private static bool IsWrappedIncidentStorageFailure(Exception exception)
+    {
+        // EF's execution strategy can wrap a provider failure in InvalidOperationException.
+        // The wrapper alone is not evidence of unavailable storage. In particular,
+        // transient transaction conflicts are not connection failures.
+        var providerConnectionFailure = false;
+        for (var inner = exception.InnerException; inner is not null; inner = inner.InnerException)
+        {
+            if (inner is PostgresException postgres)
+                return postgres.SqlState.StartsWith("08", StringComparison.Ordinal) // connection exception
+                    || postgres.SqlState.StartsWith("28", StringComparison.Ordinal) // connection authorization
+                    || postgres.SqlState is PostgresErrorCodes.AdminShutdown
+                        or PostgresErrorCodes.CrashShutdown or PostgresErrorCodes.CannotConnectNow;
+            // An inner PostgreSQL error takes precedence over its provider wrapper's
+            // IsTransient flag, which can also describe transaction conflicts.
+            if (inner is NpgsqlException { IsTransient: true }) providerConnectionFailure = true;
+        }
+        return providerConnectionFailure;
+    }
+
     private static async Task<IResult> ExecuteAsync(Func<CancellationToken, Task<IResult>> action, CancellationToken requestCancellation)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(requestCancellation);
@@ -65,7 +86,8 @@ public static class IncidentEndpoints
         catch (IncidentConditionChangedException exception) { return ConditionConflict(exception); }
         catch (Exception exception) when (exception is PrometheusQueryException or HttpRequestException)
         { return Results.Problem(statusCode: 503, title: "Prometheus telemetry is unavailable"); }
-        catch (Exception exception) when (exception is IncidentStorageUnavailableException or System.Data.Common.DbException or DbUpdateException)
+        catch (Exception exception) when (exception is IncidentStorageUnavailableException or System.Data.Common.DbException or DbUpdateException
+            || IsWrappedIncidentStorageFailure(exception))
         { return Results.Problem(statusCode: 503, title: "Incident storage is unavailable"); }
         catch (OperationCanceledException) when (!requestCancellation.IsCancellationRequested)
         { return Results.Problem(statusCode: 503, title: "Incident dependency request timed out"); }

@@ -13,6 +13,8 @@ const mounted = new Set<() => void>()
 export function setupDomTests() {
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+    window.history.replaceState(null, '', '/')
+    window.sessionStorage.clear()
     vi.useFakeTimers()
   })
 
@@ -191,4 +193,44 @@ export function makeOverview(clients = 42): OperationsOverview {
       observedAtUtc: '2026-09-10T12:00:00Z',
     },
   }
+}
+
+export function makeIncident(id = 5, version = 1, status: import('./api/incidents').IncidentStatus = 'Open'): import('./api/incidents').IncidentDetail {
+  const time = '2026-09-13T12:00:00Z'
+  return { id, number: `INC-${String(id).padStart(6, '0')}`, title: `Incident ${id}`, zone: 'zone-a', status,
+    responderLabel: null, createdAtUtc: time, resolvedAtUtc: status === 'Resolved' ? time : null, version,
+    monitoringEvidence: { capturedAtUtc: time, generatedAtUtc: time, accessPoints: [{
+      ...makeAccessPoints()[0], clients: 84, degraded: true, channelUtilizationRatio: .95,
+      managementLatencySeconds: .078, managementPacketLossRatio: .017, downAlert: null, degradationAlert: null,
+    }] }, events: [makeIncidentEvent(version, version === 1 ? 'Created' : 'NoteAdded')],
+    hasEarlierEvents: false, nextBeforeEventSequence: null }
+}
+
+export function makeIncidentEvent(sequence: number, kind: import('./api/incidents').IncidentEvent['kind'] = 'NoteAdded'): import('./api/incidents').IncidentEvent {
+  return { id: sequence, sequence, kind, occurredAtUtc: '2026-09-13T12:00:00Z', commandId: sequence === 1 ? null : '66ab97eb-7a85-4b62-872c-f4bec41e9ae1',
+    text: kind === 'NoteAdded' ? `Note ${sequence}` : null, fromStatus: null, toStatus: kind === 'Created' ? 'Open' : null,
+    previousResponderLabel: null, responderLabel: null }
+}
+
+export function makeIncidentSummary(id = 5): import('./api/incidents').IncidentSummary {
+  const { number, title, zone, status, responderLabel, createdAtUtc, resolvedAtUtc, version } = makeIncident(id)
+  return { id, number, title, zone, status, responderLabel, createdAtUtc, resolvedAtUtc, version, affectedAccessPointCount: 1 }
+}
+
+export async function clickButton(container: HTMLElement, text: string) {
+  const button = [...container.querySelectorAll('button')].find(b => b.textContent?.trim() === text)
+  if (!button) throw new Error('Missing button: ' + text)
+  await act(async () => button.click())
+}
+
+export async function enterText(container: HTMLElement, label: string, value: string) {
+  const element = [...container.querySelectorAll('label')].find(l => l.textContent?.trim() === label)
+  const control = element?.control as HTMLInputElement | HTMLTextAreaElement | null
+  if (!control) throw new Error('Missing input: ' + label)
+  await act(async () => {
+    const prototype = control instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(control, value)
+    control.dispatchEvent(new Event('input', { bubbles: true }))
+    control.dispatchEvent(new Event('change', { bubbles: true }))
+  })
 }

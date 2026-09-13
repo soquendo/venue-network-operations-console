@@ -241,3 +241,57 @@ describe('overview request ownership', () => {
     expect(firstClientCount(view.container)).toBe('99')
   })
 })
+
+describe('incident integration contract', () => {
+  it('keeps Monitoring default and exposes Incidents navigation', async () => {
+    controlFetch()
+    const view = await render(<App />)
+    expect(view.container.querySelector('nav a[aria-current="page"]')?.textContent).toBe('Monitoring')
+    expect(view.container.querySelector('a[href="?view=incidents"]')?.textContent).toBe('Incidents')
+  })
+
+  it('offers contextual creation only for affected APs and zones', async () => {
+    const fetch = controlFetch()
+    const view = await render(<App />)
+    await advanceTime(0)
+    const overview = makeOverview()
+    overview.accessPoints[0].operational = false
+    overview.accessPoints[1].degraded = true
+    await fetch.overview()[0].json(overview)
+    expect(view.container.querySelectorAll('[aria-labelledby="aps-heading"] button')).toHaveLength(2)
+    expect(view.container.querySelectorAll('.zone-card button')).toHaveLength(1)
+  })
+
+  it('loads a directly addressed stored incident independently of telemetry', async () => {
+    window.history.replaceState(null, '', '/?view=incidents&incident=5')
+    try {
+      const fetch = controlFetch()
+      const view = await render(<App />)
+      await advanceTime(0)
+      expect(fetch.requests.some(r => r.url === '/api/incidents/5')).toBe(true)
+      expect(view.container.querySelector('nav a[aria-current="page"]')?.textContent).toBe('Incidents')
+    } finally { window.history.replaceState(null, '', '/') }
+  })
+})
+
+describe('incident navigation preserves monitoring ownership',()=>{
+ it('uses one overview poller while switching views and browser history',async()=>{
+  const f=controlFetch(),v=await render(<App/>);await advanceTime(0);await f.overview()[0].json(makeOverview());await advanceTime(0)
+  await act(async()=>v.container.querySelector<HTMLAnchorElement>('nav a[href="?view=incidents"]')!.click());expect(f.history().at(-1)?.signal?.aborted).toBe(true)
+  await advanceTime(5_000);expect(f.overview()).toHaveLength(2);await advanceTime(10_000);expect(f.overview()).toHaveLength(2)
+  await act(async()=>{history.replaceState(null,'','/');window.dispatchEvent(new PopStateEvent('popstate'))});expect(v.container.querySelector('nav [aria-current]')?.textContent).toBe('Monitoring')
+  expect(f.overview()).toHaveLength(2)
+ })
+ it('preserves unsent create draft across navigation without submitting',async()=>{
+  const f=controlFetch(),v=await render(<App/>);await advanceTime(0);const o=makeOverview();o.accessPoints[0].degraded=true;await f.overview()[0].json(o)
+  await act(async()=>v.container.querySelector<HTMLButtonElement>('.zone-card button')!.click())
+  const input=v.container.querySelector<HTMLInputElement>('#incident-create-title')!
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Unsent title');input.dispatchEvent(new Event('input',{bubbles:true}))})
+  await act(async()=>v.container.querySelector<HTMLAnchorElement>('nav a[href="?view=incidents"]')!.click())
+  await act(async()=>[...v.container.querySelectorAll('button')].find(b=>b.textContent==='Continue incident draft')!.click())
+  expect(v.container.querySelector<HTMLInputElement>('#incident-create-title')?.value).toBe('Unsent title');expect(f.requests.filter(r=>r.options?.method==='POST')).toHaveLength(0)
+ })
+ it('keeps invalid direct incident links scoped with a back link',async()=>{
+  history.replaceState(null,'','/?view=incidents&incident=-1');controlFetch();const v=await render(<App/>);expect(v.container.textContent).toContain('Invalid incident link');expect(v.container.textContent).toContain('Back to incidents')
+ })
+})

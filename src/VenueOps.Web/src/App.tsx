@@ -5,6 +5,12 @@ import {
   type OperationsOverview,
 } from './api/operations'
 import { AccessPointHistoryPanel } from './components/AccessPointHistoryPanel'
+import { IncidentCreatePanel } from './components/IncidentCreatePanel'
+import { IncidentListPanel } from './components/IncidentListPanel'
+import { IncidentDetailPanel } from './components/IncidentDetailPanel'
+import { incidentUrl, interceptNavigation, listenIncidentNavigation, navigateIncident, parseIncidentLocation, type IncidentLocation } from './incidentNavigation'
+import { creationKey, defaultIncidentTitle, readAttempt, scopeFromAccessPoints, type CreationDraft, type IncidentDraft } from './incidentRequestState'
+import type { IncidentFilters } from './api/incidents'
 import './App.css'
 
 function App() {
@@ -12,6 +18,45 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const refreshRef = useRef<(() => Promise<void>) | null>(null)
+
+  const [route, setRoute] = useState(() => ({...parseIncidentLocation(), generation: 0}))
+  const [filters, setFilters] = useState<IncidentFilters>({status: route.status, zone: route.zone})
+  const [drafts] = useState(() => new Map<number, IncidentDraft>())
+  const [createDraft, setCreateDraft] = useState<CreationDraft | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createGeneration, setCreateGeneration] = useState(0)
+  const [scopeError, setScopeError] = useState<string | null>(null)
+  const createOrigin = useRef<HTMLElement | null>(null)
+  const savedCreate = readAttempt(creationKey)
+
+  useEffect(() => listenIncidentNavigation(() => {
+    const next = parseIncidentLocation()
+    if (next.view === 'incidents') setFilters({status: next.status, zone: next.zone})
+    setCreateOpen(false)
+    setRoute(previous => ({...next, generation: previous.generation + 1}))
+  }), [])
+
+  function openCreate(entryPoint: 'ap' | 'zone', target: string, origin: HTMLElement) {
+    const saved = readAttempt(creationKey)
+    createOrigin.current = origin
+    if (!saved.attempt && !saved.error && overview && !error) {
+      const scope = scopeFromAccessPoints(overview.accessPoints, entryPoint, target)
+      if (!scope) return
+      // Preserve an unsent draft when reopening exactly the same frozen scope.
+      if (!createDraft || JSON.stringify(createDraft.scope) !== JSON.stringify(scope))
+        setCreateDraft({scope, title: defaultIncidentTitle(scope), responderLabel: ''})
+    }
+    setScopeError(null); setCreateGeneration(n => n + 1); setCreateOpen(true)
+  }
+  function startCurrentScope() {
+    const previous = createDraft?.scope ?? (savedCreate.attempt?.kind === 'create' ? savedCreate.attempt.scope : null)
+    const scope = previous && overview && !error ? scopeFromAccessPoints(overview.accessPoints, previous.entryPoint, previous.target) : null
+    if (!scope) { setScopeError('The selected condition has recovered or monitoring is unavailable. Cancel and review monitoring.'); return }
+    setCreateDraft({scope, title: createDraft?.title ?? (savedCreate.attempt?.kind === 'create' ? savedCreate.attempt.payload.title : defaultIncidentTitle(scope)), responderLabel: createDraft?.responderLabel ?? ''})
+    setScopeError(null); setCreateGeneration(n => n + 1)
+  }
+  const listRoute: IncidentLocation = {view: 'incidents', invalidIncident: false, ...filters}
+  const monitoringRoute: IncidentLocation = {view: 'monitoring', invalidIncident: false}
 
   useEffect(() => {
     let active = true
@@ -81,20 +126,31 @@ function App() {
         </button>
       </header>
 
-      {error !== null && (
+      <nav className="app-navigation" aria-label="Main navigation">
+        {[{label: 'Monitoring', location: monitoringRoute}, {label: 'Incidents', location: listRoute}].map(item => <a key={item.label} href={incidentUrl(item.location)} aria-current={route.view === item.location.view ? 'page' : undefined} onClick={event => interceptNavigation(event, () => navigateIncident(item.location))}>{item.label}</a>)}
+      </nav>
+      {!createOpen && (savedCreate.attempt || savedCreate.error || createDraft) && <div className="incident-notice"><button type="button" onClick={event => {createOrigin.current = event.currentTarget; setCreateGeneration(n => n + 1); setCreateOpen(true)}}>{savedCreate.attempt || savedCreate.error ? 'Review saved create attempt' : 'Continue incident draft'}</button></div>}
+      {scopeError && <p role="alert" className="error-banner">{scopeError}</p>}
+      {createOpen && <IncidentCreatePanel key={createGeneration} draft={createDraft} onDraftChange={setCreateDraft} canCreate={!!overview && !error && overview.simulatorScrape.up && !scopeError} onConditionChanged={() => void refreshRef.current?.()} onStartCurrent={startCurrentScope} onClose={() => {setCreateOpen(false); setScopeError(null); createOrigin.current?.focus()}} onCreated={incident => {setCreateDraft(null); setCreateOpen(false); navigateIncident({...listRoute, incidentId: incident.id})}} />}
+      {route.view === 'incidents' && <>
+        {(route.incidentId || route.invalidIncident) && <a className="incident-back" href={incidentUrl(listRoute)} onClick={event => interceptNavigation(event, () => navigateIncident(listRoute))}>Back to incidents</a>}
+        {route.invalidIncident ? <section className="section-block incident-panel"><h2 tabIndex={-1} ref={element => element?.focus()}>Invalid incident link</h2><p>Incident IDs must be positive supported integers.</p></section> : route.incidentId ? <IncidentDetailPanel key={route.generation} incidentId={route.incidentId} overview={overview} overviewError={error} isOverviewLoading={isLoading} drafts={drafts} /> : <IncidentListPanel key={route.generation} filters={{status: route.status, zone: route.zone}} onFiltersChange={next => navigateIncident({view:'incidents', invalidIncident:false, ...next}, true)} onOpen={incidentId => navigateIncident({...listRoute, incidentId})} />}
+      </>}
+
+      {route.view === 'monitoring' && error !== null && (
         <div className="error-banner" role="alert">
           <strong>Telemetry refresh failed.</strong> {error}
           {overview && ' Showing the most recent successful response.'}
         </div>
       )}
 
-      {!overview && isLoading ? (
+      {route.view === 'monitoring' && !overview && isLoading ? (
         <p className="loading-message" role="status">
           Loading the Prometheus-backed overview…
         </p>
       ) : null}
 
-      {overview && (
+      {route.view === 'monitoring' && overview && (
         <>
           <section className="health-strip" aria-label="Monitoring path status">
             <HealthItem
@@ -143,6 +199,7 @@ function App() {
                       <dd>{zone.degradedAccessPoints}</dd>
                     </div>
                   </dl>
+                  {scopeFromAccessPoints(overview.accessPoints, 'zone', zone.zone) && <button type="button" className="incident-create-action" disabled={!!error || !overview.simulatorScrape.up} onClick={event => openCreate('zone', zone.zone, event.currentTarget)}>Create incident</button>}
                 </article>
               ))}
             </div>
@@ -168,6 +225,7 @@ function App() {
                     <th scope="col">Mgmt latency</th>
                     <th scope="col">Packet loss</th>
                     <th scope="col">Alert</th>
+                    <th scope="col">Response</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -175,6 +233,8 @@ function App() {
                     <AccessPointRow
                       accessPoint={accessPoint}
                       key={accessPoint.apId}
+                      canCreate={!error && overview.simulatorScrape.up}
+                      onCreate={origin => openCreate('ap', accessPoint.apId, origin)}
                     />
                   ))}
                 </tbody>
@@ -218,9 +278,11 @@ function HealthItem({
 }
 
 function AccessPointRow({
-  accessPoint,
+  accessPoint, canCreate, onCreate,
 }: {
   accessPoint: AccessPointObservation
+  canCreate: boolean
+  onCreate: (origin: HTMLElement) => void
 }) {
   return (
     <tr className={accessPoint.operational ? undefined : 'offline-row'}>
@@ -247,6 +309,7 @@ function AccessPointRow({
           </span>
         </div>
       </td>
+      <td>{(!accessPoint.operational || accessPoint.degraded) && <button type="button" className="incident-create-action" disabled={!canCreate} onClick={event => onCreate(event.currentTarget)}>Create incident</button>}</td>
     </tr>
   )
 }
