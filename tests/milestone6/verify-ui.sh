@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-export PATH="/Users/soquendo/.nvm/versions/node/v22.23.2/bin:$PATH"
 export COREPACK_ENABLE_NETWORK=0
 node --input-type=module - "$@" <<'JS'
 // Real browser/API/PostgreSQL verification. All mutations use an isolated DB/API.

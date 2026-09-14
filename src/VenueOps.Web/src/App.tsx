@@ -110,10 +110,10 @@ function App() {
     <main className="app-shell">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Milestone 3 · Historical telemetry</p>
+          <p className="eyebrow">Monitoring · Incident response</p>
           <h1>Venue Network Operations Console</h1>
           <p className="page-description">
-            A minimal view of Prometheus-backed access point and zone telemetry.
+            Monitor synthetic venue telemetry, investigate network conditions, and track incident response.
           </p>
         </div>
         <button

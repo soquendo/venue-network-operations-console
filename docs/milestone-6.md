@@ -16,15 +16,19 @@ Creation is operator-driven. An alert does not automatically create an incident,
 
 ```mermaid
 flowchart LR
-    Simulator["Synthetic AP telemetry"] --> Prom["Prometheus collection and rules"]
-    Prom --> MonitoringAPI["Monitoring API"]
-    MonitoringAPI --> MonitoringUI["Monitoring UI"]
-    Prom --> Capture["Validated current monitoring capture"]
-    Capture --> IncidentAPI["Incident API"]
-    Operator["Operator intent"] --> IncidentAPI
-    IncidentAPI <--> PostgreSQL["Durable incident data"]
-    IncidentAPI <--> IncidentUI["Incident UI"]
+    Simulator["Simulator<br/>Synthetic AP telemetry and event conditions"]
+    Prometheus["Prometheus<br/>Collection, history and alert evaluation"]
+    API["ASP.NET Core API<br/>Monitoring queries and incident logic"]
+    Database["PostgreSQL<br/>Incident state, captured evidence and response history"]
+    UI["React interface<br/>Monitoring and operator actions"]
+
+    Simulator -->|"Scraped metrics"| Prometheus
+    Prometheus -->|"Monitoring query results"| API
+    API <-->|"Incident reads and writes"| Database
+    UI <-->|"Monitoring reads and incident actions"| API
 ```
+
+Monitoring and incident responsibilities share **one ASP.NET Core API application**. Blackbox separately probes its local HTTP liveness endpoint; it does not measure wireless quality.
 
 **Prometheus owns** current monitoring measurements, time-series history, rule evaluation and alert state. **PostgreSQL owns** incident identity, current response state, immutable opening context, workflow chronology and retry/concurrency application state. Incident persistence does not duplicate the Prometheus time series. The API reads alert states; it does not trigger Prometheus alerts.
 
@@ -162,7 +166,7 @@ Current schema history is InitialIncidents → IncidentResponseWorkflow → Inci
 For an already-provisioned checkout with the normal stack healthy and normal incident storage empty, run the existing verifier from the repository root:
 
 ```bash
-VENUE_M6_EVIDENCE="$(mktemp -d /private/tmp/venue-m6-demo-XXXXXX)"
+VENUE_M6_EVIDENCE="$(mktemp -d "${TMPDIR:-/tmp}/venue-m6-demo-XXXXXX")"
 
 bash tests/milestone6/verify-ui.sh \
   --evidence-dir "$VENUE_M6_EVIDENCE/ui"
@@ -170,7 +174,7 @@ bash tests/milestone6/verify-ui.sh \
 
 It uses the existing API image, temporary incident database/role/API, temporary Vite/proxy and installed Chrome with an owned profile. Chrome runs headless; screenshots and sanitized raw evidence stay outside Git. It exercises the operator workflow and removes temporary resources without adding normal incident rows. There is no interactive/keep-open mode. Normally collected Prometheus demonstration samples remain under ordinary retention; they are not erased as cleanup.
 
-The current local verifier expects the maintained Node installation at `/Users/soquendo/.nvm/versions/node/v22.23.2/bin` and Chrome at its standard macOS application path. No browser tooling or dependency installation is part of this demonstration.
+The current local verifier expects Node 22.23.2 on `PATH` and Chrome at its standard macOS application path. It checks the version of the Node process executing the verifier. No browser tooling or dependency installation is part of this demonstration.
 
 ### Normal interactive use
 
@@ -186,7 +190,6 @@ docker compose --project-name venue-network-operations-console \
 Start the frontend in a separate terminal:
 
 ```bash
-PATH=/Users/soquendo/.nvm/versions/node/v22.23.2/bin:$PATH \
 COREPACK_ENABLE_NETWORK=0 \
 corepack npm@11.19.1 --prefix src/VenueOps.Web run dev -- \
   --host 127.0.0.1 --port 5173 --strictPort
