@@ -122,7 +122,7 @@ function App() {
           onClick={() => void refreshRef.current?.()}
           disabled={isLoading}
         >
-          {isLoading ? 'Refreshing…' : 'Refresh now'}
+          {isLoading ? 'Refreshing monitoring…' : 'Refresh monitoring'}
         </button>
       </header>
 
@@ -183,7 +183,7 @@ function App() {
                 <article className="zone-card" key={zone.zone}>
                   <div className="zone-card-heading">
                     <h3>{formatName(zone.zone)}</h3>
-                    <StatusBadge operational={zone.operationalRatio === 1} degraded={zone.degradedAccessPoints > 0} />
+                    <ZoneStatusBadge operationalRatio={zone.operationalRatio} degradedAccessPoints={zone.degradedAccessPoints} />
                   </div>
                   <dl>
                     <div>
@@ -312,6 +312,13 @@ function AccessPointRow({
       <td>{(!accessPoint.operational || accessPoint.degraded) && <button type="button" className="incident-create-action" disabled={!canCreate} onClick={event => onCreate(event.currentTarget)}>Create incident</button>}</td>
     </tr>
   )
+}
+
+function ZoneStatusBadge({ operationalRatio, degradedAccessPoints }: { operationalRatio: number; degradedAccessPoints: number }) {
+  if (operationalRatio > 0 && operationalRatio < 1) {
+    return <span className="status-badge status-offline">Partial outage</span>
+  }
+  return <StatusBadge operational={operationalRatio === 1} degraded={degradedAccessPoints > 0} />
 }
 
 function StatusBadge({ operational, degraded }: { operational: boolean; degraded: boolean }) {

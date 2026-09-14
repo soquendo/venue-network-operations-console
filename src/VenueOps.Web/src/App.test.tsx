@@ -2,7 +2,7 @@
 import { act, Activity, StrictMode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import App from './App'
-import { advanceTime, controlFetch, deferred, makeHistory, makeOverview, render, selectValue, setupDomTests } from './testUtils'
+import { advanceTime, clickButton, controlFetch, deferred, makeHistory, makeIncident, makeIncidentSummary, makeOverview, render, selectValue, setupDomTests } from './testUtils'
 import type { OperationsOverview } from './api/operations'
 
 setupDomTests()
@@ -31,7 +31,7 @@ describe('held event quality presentation', () => {
     expect(zones[1].querySelector('.status-badge')?.textContent).toBe('Healthy')
   })
 
-  it('gives offline availability precedence over degraded flags for APs and zones', async () => {
+  it('gives availability loss precedence over degraded flags for APs and zones', async () => {
     const fetch = controlFetch()
     const view = await render(<App />)
     await advanceTime(0)
@@ -40,7 +40,7 @@ describe('held event quality presentation', () => {
     Object.assign(overview.zones[0], { operationalRatio: 0.5, degradedAccessPoints: 1 })
     await fetch.overview()[0].json(overview)
     expect(view.container.querySelector('[aria-labelledby="aps-heading"] .status-badge')?.textContent).toBe('Offline')
-    expect(view.container.querySelector('.zone-card .status-badge')?.textContent).toBe('Offline')
+    expect(view.container.querySelector('.zone-card .status-badge')?.textContent).toBe('Partial outage')
   })
 
   it('retains degraded data with a refresh error and replaces it with healthy recovery', async () => {
@@ -61,6 +61,117 @@ describe('held event quality presentation', () => {
     expect(view.container.querySelector('[aria-labelledby="aps-heading"] .status-badge')?.textContent).toBe('Healthy')
     expect(view.container.querySelector('.zone-card .status-badge')?.textContent).toBe('Healthy')
     expect(view.container.querySelector('.alert-degradation.alert-firing')).toBeNull()
+  })
+})
+
+describe('zone availability semantics', () => {
+  it.each([
+    { ratio: 1, degraded: 0, label: 'Healthy', percentage: '100%' },
+    { ratio: 1, degraded: 1, label: 'Degraded', percentage: '100%' },
+    { ratio: 0.5, degraded: 0, label: 'Partial outage', percentage: '50.0%' },
+    { ratio: 0.5, degraded: 1, label: 'Partial outage', percentage: '50.0%' },
+    { ratio: 0, degraded: 0, label: 'Offline', percentage: '0%' },
+  ])('shows $label at ratio $ratio with $degraded degraded APs', async ({ ratio, degraded, label, percentage }) => {
+    const fetch = controlFetch()
+    const view = await render(<App />)
+    await advanceTime(0)
+    const overview = makeOverview()
+    Object.assign(overview.zones[0], { operationalRatio: ratio, degradedAccessPoints: degraded })
+    // The zone badge must use the supplied zone aggregate, not recalculate from AP rows.
+    await fetch.overview()[0].json(overview)
+    const zone = view.container.querySelector('.zone-card')!
+    expect(zone.querySelector('h3')?.textContent).toBe('Zone A')
+    expect(zone.querySelector('.status-badge')?.textContent).toBe(label)
+    const facts = Object.fromEntries([...zone.querySelectorAll('dl > div')].map(item => [item.querySelector('dt')!.textContent, item.querySelector('dd')!.textContent]))
+    expect(facts).toEqual({ 'Operational APs': percentage, 'Associated clients': '77', 'Degraded APs': String(degraded) })
+    if (ratio < 1) expect(zone.querySelector('.status-offline')).not.toBeNull()
+  })
+
+  it.each([
+    { condition: 'partial outage', survivor: 'healthy', expected: [{ apId: 'ap-001', expectedCondition: 'offline' }] },
+    { condition: 'mixed condition', survivor: 'degraded', expected: [{ apId: 'ap-001', expectedCondition: 'offline' }, { apId: 'ap-002', expectedCondition: 'degraded' }] },
+    { condition: 'fully offline', survivor: 'offline', expected: [{ apId: 'ap-001', expectedCondition: 'offline' }, { apId: 'ap-002', expectedCondition: 'offline' }] },
+  ])('preserves zone creation payload for $condition', async ({ survivor, expected }) => {
+    const fetch = controlFetch()
+    const view = await render(<App />)
+    await advanceTime(0)
+    const overview = makeOverview()
+    Object.assign(overview.accessPoints[0], { operational: false, clients: 0, channelUtilizationRatio: null, managementLatencySeconds: null, managementPacketLossRatio: null })
+    if (survivor === 'offline') Object.assign(overview.accessPoints[1], { operational: false, clients: 0, channelUtilizationRatio: null, managementLatencySeconds: null, managementPacketLossRatio: null })
+    if (survivor === 'degraded') overview.accessPoints[1].degraded = true
+    Object.assign(overview.zones[0], { operationalRatio: survivor === 'offline' ? 0 : 0.5, degradedAccessPoints: survivor === 'degraded' ? 1 : 0 })
+    await fetch.overview()[0].json(overview)
+    const rows = view.container.querySelectorAll('[aria-labelledby="aps-heading"] tbody tr')
+    expect(rows[0].querySelector('.status-badge')?.textContent).toBe('Offline')
+    expect(rows[1].querySelector('.status-badge')?.textContent).toBe(survivor === 'offline' ? 'Offline' : survivor === 'degraded' ? 'Degraded' : 'Healthy')
+    await act(async () => view.container.querySelector<HTMLButtonElement>('.zone-card button')!.click())
+    await clickButton(view.container.querySelector<HTMLElement>('[aria-labelledby="create-incident-heading"]')!, 'Create incident')
+    const posts = fetch.requests.filter(request => request.options?.method === 'POST')
+    expect(posts).toHaveLength(1)
+    expect(posts[0].url).toBe('/api/incidents')
+    const payload = JSON.parse(String(posts[0].options?.body))
+    expect(payload.accessPoints).toEqual(expected)
+    expect(Object.keys(payload).sort()).toEqual(['accessPoints', 'creationCommandId', 'responderLabel', 'title'])
+    expect(payload.responderLabel).toBeNull()
+    expect(payload.title).toBe(expected.length === 1 ? 'ap-001 offline' : 'Zone A network condition')
+    expect(payload.creationCommandId).toMatch(/^[0-9a-f-]{36}$/)
+  })
+})
+
+describe('visible refresh ownership', () => {
+  it.each(['list', 'detail'] as const)('keeps monitoring and stored %s refreshes separate', async route => {
+    const path = route === 'list' ? '/api/incidents?status=Open&zone=zone-a' : '/api/incidents/5'
+    window.history.replaceState(null, '', route === 'list' ? '/?view=incidents&status=Open&zone=zone-a' : '/?view=incidents&incident=5')
+    const fetch = controlFetch()
+    const view = await render(<App />)
+    await advanceTime(0)
+    await fetch.overview()[0].json(makeOverview())
+    const storedRequests = () => fetch.requests.filter(request => request.url === path)
+    const initial = makeIncident()
+    await storedRequests()[0].json(route === 'list' ? { items: [makeIncidentSummary()], hasMore: false, nextBeforeId: null } : initial)
+    const localLabel = route === 'list' ? 'Refresh incidents' : 'Refresh incident'
+    const labels = () => [...view.container.querySelectorAll('button')].map(button => button.textContent)
+    expect.soft(labels()).toContain('Refresh monitoring')
+    expect(labels()).toContain(localLabel)
+    const evidence = () => view.container.querySelector('[aria-labelledby="captured-heading"]')?.textContent
+    const captured = evidence()
+    const beforeMonitoring = fetch.requests.length
+    // Target the existing shell control so pre-fix ownership assertions still execute.
+    const shell = view.container.querySelector<HTMLButtonElement>('.refresh-button')!
+    await act(async () => shell.click())
+    expect.soft(shell.textContent).toBe('Refreshing monitoring…')
+    expect(shell.disabled).toBe(true)
+    expect(fetch.requests.slice(beforeMonitoring).map(request => request.url)).toEqual(['/api/operations/overview'])
+    await fetch.overview()[1].json(makeOverview(99))
+    expect.soft(shell.textContent).toBe('Refresh monitoring')
+    expect(shell.disabled).toBe(false)
+    expect(storedRequests()).toHaveLength(1)
+    if (route === 'detail') {
+      expect(view.container.querySelector('[data-incident-version]')?.getAttribute('data-incident-version')).toBe('1')
+      expect(evidence()).toBe(captured)
+      expect(view.container.querySelector('[aria-labelledby="current-network-heading"]')?.textContent).toContain('Clients99')
+    }
+    const beforeLocal = fetch.requests.length
+    await clickButton(view.container, localLabel)
+    expect(fetch.requests.slice(beforeLocal).map(request => request.url)).toEqual([path])
+    if (route === 'list') {
+      await storedRequests()[1].json({ items: [{ ...makeIncidentSummary(), responderLabel: 'Network Operations', version: 2 }], hasMore: false, nextBeforeId: null })
+      expect(view.container.querySelector('.incident-list')?.textContent).toContain('Network Operations')
+    } else {
+      await storedRequests()[1].json({ ...makeIncident(5, 2, 'Investigating'), monitoringEvidence: initial.monitoringEvidence })
+      expect(view.container.querySelector('[data-incident-version]')?.getAttribute('data-incident-version')).toBe('2')
+      expect(view.container.querySelector('[aria-labelledby="response-state-heading"]')?.textContent).toContain('Investigating')
+      expect(evidence()).toBe(captured)
+      expect(view.container.querySelector('[aria-labelledby="current-network-heading"]')?.textContent).toContain('Clients99')
+    }
+    expect(fetch.overview()).toHaveLength(2)
+    expect(fetch.history()).toHaveLength(0)
+    expect(fetch.requests.filter(request => request.url.startsWith('/api/incidents')).map(request => request.url)).toEqual([path, path])
+    // No clock advancement occurred during clicks; the existing sole poller remains scheduled.
+    expect(vi.getTimerCount()).toBe(1)
+    await advanceTime(5_000)
+    expect(fetch.overview()).toHaveLength(3)
+    expect(storedRequests()).toHaveLength(2)
   })
 })
 
