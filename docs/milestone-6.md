@@ -38,7 +38,7 @@ Monitoring exposes AP/zone identity, operational/degraded state, clients, utiliz
 
 AP measurements, client counts, utilization, management latency/loss and simulator network conditions are **synthetic inputs**. Prometheus scraping/rules, ASP.NET validation, PostgreSQL persistence/transactions, EF migrations, concurrency checks, retry/idempotency handling, browser request ownership, incident workflow, dependency failure/recovery and local Docker networking are **real application behavior** operating on those inputs.
 
-The project contains no real Javits telemetry, incident process, responder identity or wireless-controller data. It is not a ServiceNow replacement, venue-capacity prediction or production-deployment claim. The deterministic conditions used here are described in [Milestone 5](milestone-5.md).
+Incident records use synthetic monitoring inputs; responder labels are unverified free text. It is not a ServiceNow replacement, venue-capacity prediction or production-deployment claim. The deterministic conditions used here are described in [Milestone 5](milestone-5.md).
 
 ## Captured evidence versus current telemetry
 

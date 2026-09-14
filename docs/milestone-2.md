@@ -80,7 +80,7 @@ The browser requests `/api` from the Vite origin, and Vite forwards that path to
 ## Still deferred
 
 - Floor-plan and topology visualization
-- Javits-specific rooms or AP placement
+- Room-level detail and AP placement
 - Incident workflows and persistence
 - Historical charts and selectable time ranges
 - Event-day load scenarios

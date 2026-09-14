@@ -31,7 +31,7 @@ Task 1 established the held-position vertical slice. Task 2 added lazy monotonic
 
 API quality classification is real domain logic applied to synthetic measurements. Blackbox measures an actual local HTTP request; it does not measure wireless quality.
 
-This project does not contain actual Javits telemetry, controller data, AP/client counts, attendance, RF characteristics, congestion thresholds, or venue capacity measurements. It does not predict Wi-Fi performance or model a real venue's infrastructure.
+The synthetic profile is illustrative; it does not predict Wi-Fi performance or model deployed wireless infrastructure.
 
 ## Event model
 
