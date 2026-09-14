@@ -8,13 +8,19 @@ Milestone 4 hardens dependency validation, frontend request ownership, sparse-hi
 
 Milestone 5 adds deterministic synthetic event-day degradation with manual positioning and approximately 11-minute automatic playback. Prometheus collection and alert evaluation, API quality classification, and the existing overview/history show buildup, degradation, and recovery. See the [Milestone 5 model, demo, and verification evidence](docs/milestone-5.md).
 
+Milestone 6 adds PostgreSQL-backed durable network incidents created from current conditions, with immutable captured evidence, investigation/monitoring/resolution/reopening, notes and responder/team labels. Retry-safe creation and workflow commands, optimistic concurrency, and bounded discovery support the operator-facing list/detail/workflow UI. Captured incident evidence remains separate from current telemetry. See the [Milestone 6 workflow, demo, and verification evidence](docs/milestone-6.md).
+
 ## Local development
+
+Before first database initialization, configure the ignored private `.env` from `.env.example` with a local-only password and restrict it to mode `0600`. For an existing incident-data volume, preserve the same credential; do not overwrite it. See [database lifecycle](docs/milestone-6.md#database-lifecycle).
 
 Initial setup: build and start the monitoring stack:
 
 ```bash
 docker compose up --build --detach --wait
 ```
+
+Apply the [explicit incident migration step](docs/milestone-6.md#database-lifecycle) after initial setup or an incident schema upgrade. Ordinary API startup does not auto-migrate.
 
 Use the maintained Node 22.23.2 environment and project npm 11.19.1 through Corepack. From the repository root, provision and start the frontend in a second terminal:
 
@@ -32,3 +38,4 @@ Open <http://127.0.0.1:5173>. For subsequent event demonstrations with existing 
 - [Milestone 3 access point history](docs/milestone-3.md)
 - [Milestone 4 integrated verification](docs/milestone-4.md)
 - [Milestone 5 event-day load and degradation](docs/milestone-5.md)
+- [Milestone 6 incident triage and response](docs/milestone-6.md)
