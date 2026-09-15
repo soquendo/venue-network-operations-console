@@ -4,7 +4,7 @@ Milestone 5 demonstrates software engineering through a deterministic operations
 
 ## What changed
 
-The **High-Density Event Day** profile can be held at an absolute virtual minute or played automatically over approximately 11 real minutes. The simulator generates AP measurements; the API derives current quality from validated Prometheus telemetry; a separate Prometheus rule warns about sustained degradation. The existing overview and history display buildup, degraded quality, and recovery without new scenario controls.
+The **High-Density Event Day** profile can be held at an absolute virtual minute or played automatically over approximately 11 real minutes. The simulator generates AP measurements; the API derives current quality from validated Prometheus telemetry; a separate Prometheus rule warns about sustained degradation. At the Milestone 5 checkpoint, the existing overview and history displayed buildup, degraded quality, and recovery without frontend scenario controls. The current [local demo panel](../src/VenueOps.Web/README.md#demo-scenarios) exposes those existing simulator controls.
 
 ```mermaid
 flowchart LR
@@ -172,7 +172,7 @@ curl --fail --silent --show-error -X POST \
   http://127.0.0.1:8081/simulation/event-day/start
 ```
 
-Watch client load rise, Zone A enter degradation, the separate warning become pending/firing, and recovery restore healthy quality. Zone B remains healthy. Inspect each AP's 15-minute history. After about 11 minutes, use GET status again to confirm `completed`, minute 660, EVENT_CLOSE, and zero load. The frontend intentionally has no scenario-control panel or completion banner.
+Watch client load rise, Zone A enter degradation, the separate warning become pending/firing, and recovery restore healthy quality. Zone B remains healthy. Inspect each AP's 15-minute history. After about 11 minutes, use GET status again to confirm `completed`, minute 660, EVENT_CLOSE, and zero load. Milestone 5 originally shipped without a frontend scenario-control panel or completion banner; the current [local demo panel](../src/VenueOps.Web/README.md#demo-scenarios) provides controls and confirmed simulator status.
 
 Reset afterward, including if the demonstration is interrupted:
 

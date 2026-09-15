@@ -195,7 +195,7 @@ corepack npm@11.19.1 --prefix src/VenueOps.Web run dev -- \
   --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-Open <http://127.0.0.1:5173>. Hold a deterministic Zone A condition:
+Open <http://127.0.0.1:5173>. In the current [local demo panel](../src/VenueOps.Web/README.md#demo-scenarios), apply **Event congestion** to hold a deterministic Zone A condition. The simulator API remains a lower-level alternative:
 
 ```bash
 curl --fail --silent --show-error -X PUT \
@@ -208,7 +208,7 @@ Wait for monitoring to collect degradation, then:
 
 1. Use Zone A's **Create incident** action; review the frozen AP scope and title.
 2. Set a responder/team label, start investigating and add a note.
-3. Reset the simulator using the command below. Wait for current telemetry to become healthy; captured evidence stays degraded and the incident remains Investigating.
+3. Use **Reset to baseline** in the local demo panel, or the command below. Wait for current telemetry to become healthy; captured evidence stays degraded and the incident remains Investigating.
 4. Move to Monitoring, resolve with a reason and reload. Optionally reopen with a reason and inspect retained chronology.
 5. Inspect discovery/detail, then reset the simulator again when finished.
 
@@ -217,7 +217,7 @@ curl --fail --silent --show-error -X POST \
   http://127.0.0.1:8081/simulation/event-day/reset
 ```
 
-The incident demo needs no 11-minute automatic run. Scenario controls remain simulator API controls.
+The incident demo needs no 11-minute automatic run. The local panel uses the existing simulator API controls; resetting them preserves durable incidents and monitoring history.
 
 ## Verification evidence
 

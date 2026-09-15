@@ -521,3 +521,59 @@ tbody tr:last-child td {
 .incident-timeline time { display: block; color: var(--text-muted); font-size: .85rem; margin-top: .3rem; }
 .incident-timeline p { white-space: pre-wrap; margin-bottom: .25rem; }
 @media (max-width: 760px) { .incident-panel .section-heading { align-items: start; gap: .75rem; } .incident-filters { align-items: stretch; } .incident-filters label { flex-basis: 100%; } .incident-facts { gap: .8rem; } .incident-panel form { max-width: 100%; } .incident-evidence, .incident-current { padding: .65rem; } }
+.demo-scenarios {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+
+.demo-scenarios p,
+.demo-scenario-option > span,
+.demo-status dt {
+  color: var(--text-muted);
+}
+
+.demo-scenario-options {
+  min-width: 0;
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+}
+
+.demo-scenario-cards {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 4px;
+  padding: 4px 4px 10px;
+}
+
+.demo-scenario-option {
+  flex: 0 0 min(270px, 100%);
+  scroll-snap-align: start;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-content: start;
+  gap: 8px 10px;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.demo-scenario-option:hover,
+.demo-scenario-option:has(input:checked) { border-color: var(--accent); }
+.demo-scenario-option:has(input:checked) { background: var(--info-bg); }
+.demo-scenario-option:focus-within { outline: 3px solid var(--focus); outline-offset: 1px; }
+.demo-scenario-option > span { grid-column: 2; }
+.demo-scenario-option input { accent-color: var(--accent); }
+.demo-scenario-option input:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.demo-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.demo-outcome { margin-top: 16px; padding: 12px; border: 1px solid var(--info-border); border-radius: 6px; background: var(--info-bg); }
+.demo-status dl { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.demo-status dd { margin: 0; overflow-wrap: anywhere; }

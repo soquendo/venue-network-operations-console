@@ -8,6 +8,8 @@ import { AccessPointHistoryPanel } from './components/AccessPointHistoryPanel'
 import { IncidentCreatePanel } from './components/IncidentCreatePanel'
 import { IncidentListPanel } from './components/IncidentListPanel'
 import { IncidentDetailPanel } from './components/IncidentDetailPanel'
+import { DemoScenariosPanel } from './components/DemoScenariosPanel'
+import { useDemoScenarios } from './useDemoScenarios'
 import { incidentUrl, interceptNavigation, listenIncidentNavigation, navigateIncident, parseIncidentLocation, type IncidentLocation } from './incidentNavigation'
 import { creationKey, defaultIncidentTitle, readAttempt, scopeFromAccessPoints, type CreationDraft, type IncidentDraft } from './incidentRequestState'
 import type { IncidentFilters } from './api/incidents'
@@ -28,6 +30,8 @@ function App() {
   const [scopeError, setScopeError] = useState<string | null>(null)
   const createOrigin = useRef<HTMLElement | null>(null)
   const savedCreate = readAttempt(creationKey)
+  const [demoOpen, setDemoOpen] = useState(false)
+  const demo = useDemoScenarios(import.meta.env.DEV && route.view === 'monitoring' && demoOpen, import.meta.env.DEV)
 
   useEffect(() => listenIncidentNavigation(() => {
     const next = parseIncidentLocation()
@@ -129,6 +133,7 @@ function App() {
       <nav className="app-navigation" aria-label="Main navigation">
         {[{label: 'Monitoring', location: monitoringRoute}, {label: 'Incidents', location: listRoute}].map(item => <a key={item.label} href={incidentUrl(item.location)} aria-current={route.view === item.location.view ? 'page' : undefined} onClick={event => interceptNavigation(event, () => navigateIncident(item.location))}>{item.label}</a>)}
       </nav>
+      {import.meta.env.DEV && route.view === 'monitoring' && <DemoScenariosPanel open={demoOpen} onOpenChange={setDemoOpen} controller={demo} />}
       {!createOpen && (savedCreate.attempt || savedCreate.error || createDraft) && <div className="incident-notice"><button type="button" onClick={event => {createOrigin.current = event.currentTarget; setCreateGeneration(n => n + 1); setCreateOpen(true)}}>{savedCreate.attempt || savedCreate.error ? 'Review saved create attempt' : 'Continue incident draft'}</button></div>}
       {scopeError && <p role="alert" className="error-banner">{scopeError}</p>}
       {createOpen && <IncidentCreatePanel key={createGeneration} draft={createDraft} onDraftChange={setCreateDraft} canCreate={!!overview && !error && overview.simulatorScrape.up && !scopeError} onConditionChanged={() => void refreshRef.current?.()} onStartCurrent={startCurrentScope} onClose={() => {setCreateOpen(false); setScopeError(null); createOrigin.current?.focus()}} onCreated={incident => {setCreateDraft(null); setCreateOpen(false); navigateIncident({...listRoute, incidentId: incident.id})}} />}

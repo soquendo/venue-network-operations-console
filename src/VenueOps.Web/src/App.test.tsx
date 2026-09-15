@@ -7,6 +7,66 @@ import type { OperationsOverview } from './api/operations'
 
 setupDomTests()
 
+describe('local demo integration', () => {
+  it('offers closed controls without adding a simulator request or a polling owner', async () => {
+    const f = controlFetch(), view = await render(<App />)
+    await advanceTime(0)
+    expect([...view.container.querySelectorAll('button')].some(b => b.textContent === 'Demo scenarios')).toBe(true)
+    expect(view.container.querySelector('[aria-label="Scenario presets"]')).toBeNull()
+    await f.overview()[0].json(makeOverview())
+    expect(f.requests.map(r => r.url)).toEqual(['/api/operations/overview'])
+    await advanceTime(0); await f.history()[0].json(makeHistory())
+    // Monitoring mounts its existing history owner after the first overview.
+    expect(vi.getTimerCount()).toBe(2)
+    expect(f.requests.filter(r => r.url.startsWith('/simulation'))).toHaveLength(0)
+  })
+
+  it('keeps demo recovery controls available when the overview fails', async () => {
+    const f = controlFetch(), view = await render(<App />)
+    await advanceTime(0); await f.overview()[0].json({ detail: 'Monitoring unavailable' }, 503)
+    await clickButton(view.container, 'Demo scenarios')
+    expect(f.requests.filter(r => r.url === '/simulation/event-day')).toHaveLength(1)
+    expect([...view.container.querySelectorAll('button')].some(b => b.textContent === 'Reset to baseline')).toBe(true)
+    expect(view.container.textContent).toContain('Monitoring unavailable')
+  })
+
+  it('has no controls or simulator traffic outside development', async () => {
+    vi.stubEnv('DEV', false)
+    try {
+      const f = controlFetch(), view = await render(<App />)
+      await advanceTime(0)
+      expect(view.container.textContent).not.toContain('Demo scenarios')
+      expect(f.requests.every(r => !r.url.startsWith('/simulation'))).toBe(true)
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it('finishes the explicit sequence across incident navigation without refreshing monitoring or history', async () => {
+    const f = controlFetch(), view = await render(<App />)
+    const state = (offline = false) => ({ scenario: 'High-Density Event Day', mode: 'baseline', elapsedMinutes: null, phase: null, normalizedLoad: 0,
+      accessPoints: makeOverview().accessPoints.map((ap, i) => offline && i === 0 ? { ...ap, scenario: 'offline', operational: false, clients: 0, channelUtilizationRatio: null, managementLatencySeconds: null, managementPacketLossRatio: null } : { ...ap, scenario: 'healthy' }) })
+    const simulation = () => f.requests.filter(r => r.url.startsWith('/simulation'))
+    await advanceTime(0); await f.overview()[0].json(makeOverview())
+    await advanceTime(0); await f.history()[0].json(makeHistory())
+    await clickButton(view.container, 'Demo scenarios'); await simulation()[0].json(state())
+    await act(async () => view.container.querySelector<HTMLInputElement>('input[name="demo-scenario"][value="single-outage"]')!.click())
+    await clickButton(view.container, 'Apply scenario'); await simulation()[1].json(state())
+    await act(async () => [...view.container.querySelectorAll<HTMLAnchorElement>('nav a')].find(a => a.textContent === 'Incidents')!.click())
+    expect(view.container.querySelector('[aria-label="Local demo controls"]')).toBeNull()
+    await simulation()[2].json(state())
+    await simulation()[3].json({ apId: 'ap-001', zone: 'zone-a', scenario: 'offline' })
+    await simulation()[4].json(state(true))
+    expect(f.overview()).toHaveLength(1)
+    expect(f.history()).toHaveLength(1)
+    expect(f.requests.filter(r => r.url === '/api/incidents')).toHaveLength(1)
+    await act(async () => [...view.container.querySelectorAll<HTMLAnchorElement>('nav a')].find(a => a.textContent === 'Monitoring')!.click())
+    expect(view.container.textContent).toContain('Simulator state matches the requested scenario')
+    expect(simulation()).toHaveLength(6)
+    expect(simulation()[5].options?.method).toBe('GET')
+    expect(f.overview()).toHaveLength(1)
+    expect(f.requests.filter(r => r.url.startsWith('/api/incidents') && r.options?.method === 'POST')).toHaveLength(0)
+  })
+})
+
 describe('held event quality presentation', () => {
   it('shows degraded operational APs and zones, healthy unaffected zones, and separate alerts', async () => {
     const fetch = controlFetch()
